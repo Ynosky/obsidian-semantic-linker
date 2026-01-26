@@ -1,0 +1,125 @@
+{
+    "$schema": "https://biomejs.dev/schemas/2.3.13/schema.json",
+    "vcs": {
+        "enabled": true,
+        "clientKind": "git",
+        "useIgnoreFile": true
+    },
+    "files": {
+        "ignoreUnknown": false,
+        "includes": ["src/**/*", "*.ts", "*.json", "*.mjs"]
+    },
+    "formatter": {
+        "enabled": true,
+        "formatWithErrors": true,
+        "attributePosition": "multiline",
+        "indentStyle": "space",
+        "indentWidth": 4,
+        "lineEnding": "lf",
+        "lineWidth": 80
+    },
+    "css": {
+        "parser": {
+            "tailwindDirectives": true
+        },
+        "formatter": {
+            "enabled": true
+        }
+    },
+    "linter": {
+        "enabled": true,
+        "rules": {
+            "recommended": true,
+            "correctness": {
+                "noUnusedVariables": "error",
+                "noUnusedImports": "error",
+                "noUndeclaredVariables": "off",
+                "useHookAtTopLevel": "error"
+            },
+            "suspicious": {
+                "noExplicitAny": "warn",
+                "noConfusingVoidType": "warn"
+            },
+            "style": {
+                "useConst": "error",
+                "noNonNullAssertion": "warn",
+                "useTemplate": "error"
+            },
+            "complexity": {
+                "noForEach": "off",
+                "noStaticOnlyClass": "off",
+                "noExcessiveCognitiveComplexity": "warn"
+            },
+            "performance": {
+                "noAccumulatingSpread": "warn",
+                "noDelete": "warn"
+            },
+            "nursery": {
+                "noFloatingPromises": "error"
+            }
+        }
+    },
+    "javascript": {
+        "parser": {
+            "unsafeParameterDecoratorsEnabled": false
+        },
+        "formatter": {
+            "enabled": true,
+            "arrowParentheses": "always",
+            "bracketSameLine": false,
+            "bracketSpacing": true,
+            "jsxQuoteStyle": "double",
+            "quoteProperties": "asNeeded",
+            "quoteStyle": "single",
+            "semicolons": "always",
+            "trailingCommas": "all",
+            "indentStyle": "space",
+            "indentWidth": 4,
+            "lineEnding": "lf",
+            "lineWidth": 80,
+            "attributePosition": "multiline"
+        },
+        "globals": ["global", "console", "NodeJS"]
+    },
+    "json": {
+        "parser": {
+            "allowComments": true,
+            "allowTrailingCommas": false
+        },
+        "formatter": {
+            "enabled": true,
+            "indentStyle": "space",
+            "indentWidth": 4,
+            "lineWidth": 80,
+            "trailingCommas": "none"
+        }
+    },
+    "overrides": [
+        {
+            "includes": ["manifest.json", "package.json", "tsconfig.json"],
+            "json": {
+                "formatter": {
+                    "trailingCommas": "none"
+                }
+            }
+        },
+        {
+            "includes": ["versions.json"],
+            "json": {
+                "formatter": {
+                    "trailingCommas": "none"
+                }
+            }
+        },
+        {
+            "includes": ["*.test.ts", "*.spec.ts"],
+            "linter": {
+                "rules": {
+                    "suspicious": {
+                        "noExplicitAny": "off"
+                    }
+                }
+            }
+        }
+    ]
+}
