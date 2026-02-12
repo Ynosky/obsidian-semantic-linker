@@ -20,13 +20,10 @@ type Candidate = {
 };
 
 const INITIAL_MIN_SCORE = -2;
-
 const RERANK_MULTIPLIER = 5;
 const MIN_RERANK_COUNT = 50;
 const MAX_RERANK_COUNT = 1000;
-
 const TOP_K = 3;
-
 const CHECK_INTERVAL = 100;
 const YIELD_THRESHOLD_MS = 16;
 
@@ -59,16 +56,53 @@ const calculateDotProduct = (a: Vector, b: Vector): number => {
     return dot;
 };
 
-const findBestMatchingChunk = (
-    queryChunks: readonly Vector[],
-    targetChunks: readonly EmbeddedChunk[],
+const computeAveragePooling = (
+    query: SearchQuery,
+    entry: EmbeddedNote,
+): ScoredChunk => ({
+    score: calculateDotProduct(query.avg, entry.avgEmbedding),
+    chunk: entry.chunks[0] ?? null,
+});
+
+const computeMaxSim = (
+    query: SearchQuery,
+    entry: EmbeddedNote,
+): ScoredChunk => {
+    let totalMaxSim = 0;
+    let globalMaxScore = INITIAL_MIN_SCORE;
+    let globalBestChunk: EmbeddedChunk | null = null;
+
+    for (const qVec of query.chunks) {
+        let maxSimForQ = INITIAL_MIN_SCORE;
+        for (const tChunk of entry.chunks) {
+            const s = calculateDotProduct(qVec, tChunk.embedding);
+            if (s > maxSimForQ) {
+                maxSimForQ = s;
+            }
+            if (s > globalMaxScore) {
+                globalMaxScore = s;
+                globalBestChunk = tChunk;
+            }
+        }
+        totalMaxSim += maxSimForQ;
+    }
+
+    const finalScore =
+        query.chunks.length > 0 ? totalMaxSim / query.chunks.length : 0;
+
+    return { score: finalScore, chunk: globalBestChunk };
+};
+
+const computeTopKMean = (
+    query: SearchQuery,
+    entry: EmbeddedNote,
 ): ScoredChunk => {
     const allScores: number[] = [];
-    let globalBestChunk: EmbeddedChunk | null = null;
     let globalMaxScore = INITIAL_MIN_SCORE;
+    let globalBestChunk: EmbeddedChunk | null = null;
 
-    for (const qVec of queryChunks) {
-        for (const tChunk of targetChunks) {
+    for (const qVec of query.chunks) {
+        for (const tChunk of entry.chunks) {
             const s = calculateDotProduct(qVec, tChunk.embedding);
             allScores.push(s);
 
@@ -83,17 +117,31 @@ const findBestMatchingChunk = (
         return { score: 0, chunk: null };
     }
 
-    allScores.sort((a, b) => b - a);
-
-    const k = Math.min(TOP_K, allScores.length);
+    const sortedScores = [...allScores].sort((a, b) => b - a);
+    const k = Math.min(TOP_K, sortedScores.length);
     let sumTopK = 0;
     for (let i = 0; i < k; i++) {
-        sumTopK += allScores[i] ?? 0;
+        sumTopK += sortedScores[i] ?? 0;
     }
 
-    const finalScore = sumTopK / k;
+    return { score: sumTopK / k, chunk: globalBestChunk };
+};
 
-    return { score: finalScore, chunk: globalBestChunk };
+const findBestMatchingChunk = (
+    query: SearchQuery,
+    entry: EmbeddedNote,
+    mode: SettingParams['similaritySearchMode'],
+): ScoredChunk => {
+    switch (mode) {
+        case 'average-pooling':
+            return computeAveragePooling(query, entry);
+        case 'max-sim':
+            return computeMaxSim(query, entry);
+        case 'top-k-mean':
+            return computeTopKMean(query, entry);
+        default:
+            return computeAveragePooling(query, entry);
+    }
 };
 
 const getInitialCandidates = async (
@@ -142,14 +190,10 @@ const getRerankCandidateCount = (
     totalCandidates: number,
 ): number => {
     const calculated = limit * RERANK_MULTIPLIER;
-
-    let targetCount = calculated;
-    if (targetCount < MIN_RERANK_COUNT) {
-        targetCount = MIN_RERANK_COUNT;
-    } else if (targetCount > MAX_RERANK_COUNT) {
-        targetCount = MAX_RERANK_COUNT;
-    }
-
+    const targetCount = Math.max(
+        MIN_RERANK_COUNT,
+        Math.min(calculated, MAX_RERANK_COUNT),
+    );
     return Math.min(targetCount, totalCandidates);
 };
 
@@ -171,8 +215,9 @@ export const searchSimilar = async (
 
     const reranked = candidatesToRerank.map((c) => {
         const { score, chunk } = findBestMatchingChunk(
-            query.chunks,
-            c.entry.chunks,
+            query,
+            c.entry,
+            settings.similaritySearchMode,
         );
         return {
             path: c.path,

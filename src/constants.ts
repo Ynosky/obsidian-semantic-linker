@@ -23,6 +23,7 @@ export const DEFAULT_SETTINGS: SettingParams = {
     parallelIndexingCount: 8,
     maxRetries: 5,
     showInlineSimilarNotes: true,
+    similaritySearchMode: 'average-pooling',
 };
 
 export const VIEW_TYPE_SEMANTIC_LINKER = 'semantic-linker-view';

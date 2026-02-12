@@ -3,6 +3,11 @@ export type Result<T, E = string> =
     | { readonly ok: false; readonly error: E };
 
 /**
+ * 類似度検索の手法
+ */
+export type SimilaritySearchMode = 'top-k-mean' | 'max-sim' | 'average-pooling';
+
+/**
  * プラグインの設定値
  */
 export type SettingParams = {
@@ -44,6 +49,8 @@ export type SettingParams = {
     maxRetries: number;
     /** ノート下部に類似ノート一覧を表示するか */
     showInlineSimilarNotes: boolean;
+    /** 類似度検索の手法 */
+    similaritySearchMode: SimilaritySearchMode;
 };
 
 /**

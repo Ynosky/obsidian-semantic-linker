@@ -568,6 +568,25 @@ export class SemanticLinkerSettingTab extends PluginSettingTab {
 
         group.addSetting((setting) => {
             setting
+                .setName('Similarity search mode')
+                .setDesc('Method used to calculate similarity between notes.')
+                .addDropdown((dropdown) => {
+                    dropdown
+                        .addOption('top-k-mean', 'Top-k mean')
+                        .addOption('max-sim', 'Max-sim')
+                        .addOption('average-pooling', 'Average pooling')
+                        .setValue(this.plugin.settings.similaritySearchMode)
+                        .onChange(async (value) => {
+                            await this.save({
+                                similaritySearchMode:
+                                    value as typeof this.plugin.settings.similaritySearchMode,
+                            });
+                        });
+                });
+        });
+
+        group.addSetting((setting) => {
+            setting
                 .setName('Introduction weight')
                 .setDesc(
                     'Weight multiplier for the first chunk (title/intro). Higher values prioritize the introduction.',
