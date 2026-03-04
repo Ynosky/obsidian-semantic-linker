@@ -48,133 +48,121 @@ export const StoreOps = {
     },
 } as const;
 
-export type VectorStoreService = {
-    readonly getState: () => VectorStore;
-    readonly load: () => Promise<void>;
-    readonly commitUpsert: (
+export class VectorStoreService {
+    private cachedStore: VectorStore = { entries: {} };
+    private provider: ReturnType<typeof createStorageProvider>;
+
+    constructor(dbName: string) {
+        this.provider = createStorageProvider({
+            dbName,
+            storeName: 'vectors',
+            version: DB_VERSION,
+            keyPath: 'path',
+        });
+    }
+
+    public getState = (): VectorStore => {
+        return this.cachedStore;
+    };
+
+    public load = async (): Promise<void> => {
+        try {
+            const results = await this.provider.getAll<EmbeddedNote>();
+            const entries = Object.fromEntries(results.map((e) => [e.path, e]));
+            this.cachedStore = { entries };
+        } catch (error) {
+            logger.errorLog('Failed to load VectorStore:', error);
+            this.cachedStore = { entries: {} };
+        }
+    };
+
+    public commitUpsert = async (
         file: TFile,
         chunks: readonly EmbeddedChunk[],
         avgEmbedding: Vector,
-    ) => Promise<void>;
-    readonly commitUpsertBatch: (
+    ): Promise<void> => {
+        this.cachedStore = StoreOps.upsert(
+            this.cachedStore,
+            file,
+            chunks,
+            avgEmbedding,
+        );
+
+        const entry: EmbeddedNote = {
+            path: file.path,
+            mtime: file.stat.mtime,
+            chunks: [...chunks],
+            avgEmbedding,
+        };
+
+        try {
+            await this.provider.putBatch<EmbeddedNote>([entry]);
+        } catch (error) {
+            logger.errorLog(`Failed to save vector for ${file.path}:`, error);
+        }
+    };
+
+    public commitUpsertBatch = async (
         items: readonly VectorStoreBatchItem[],
-    ) => Promise<void>;
-    readonly commitRemove: (path: string) => Promise<void>;
-    readonly commitRemoveBatch: (paths: readonly string[]) => Promise<void>;
-    readonly clear: () => Promise<void>;
-};
+    ): Promise<void> => {
+        if (items.length === 0) return;
 
-export const createVectorStoreService = (
-    dbName: string,
-): VectorStoreService => {
-    const provider = createStorageProvider({
-        dbName,
-        storeName: 'vectors',
-        version: DB_VERSION,
-        keyPath: 'path',
-    });
-
-    let cachedStore: VectorStore = { entries: {} };
-
-    return {
-        getState: () => cachedStore,
-
-        load: async () => {
-            try {
-                const results = await provider.getAll<EmbeddedNote>();
-                const entries = Object.fromEntries(
-                    results.map((e) => [e.path, e]),
-                );
-                cachedStore = { entries };
-            } catch (error) {
-                logger.errorLog('Failed to load VectorStore:', error);
-                cachedStore = { entries: {} };
-            }
-        },
-
-        commitUpsert: async (file, chunks, avgEmbedding) => {
-            cachedStore = StoreOps.upsert(
-                cachedStore,
+        items.forEach(({ file, chunks, avgEmbedding }) => {
+            this.cachedStore = StoreOps.upsert(
+                this.cachedStore,
                 file,
                 chunks,
                 avgEmbedding,
             );
+        });
 
-            const entry: EmbeddedNote = {
+        const dbEntries: EmbeddedNote[] = items.map(
+            ({ file, chunks, avgEmbedding }) => ({
                 path: file.path,
                 mtime: file.stat.mtime,
                 chunks: [...chunks],
                 avgEmbedding,
-            };
+            }),
+        );
 
-            try {
-                await provider.putBatch<EmbeddedNote>([entry]);
-            } catch (error) {
-                logger.errorLog(
-                    `Failed to save vector for ${file.path}:`,
-                    error,
-                );
-            }
-        },
-
-        commitUpsertBatch: async (items) => {
-            if (items.length === 0) return;
-
-            items.forEach(({ file, chunks, avgEmbedding }) => {
-                cachedStore = StoreOps.upsert(
-                    cachedStore,
-                    file,
-                    chunks,
-                    avgEmbedding,
-                );
-            });
-
-            const dbEntries: EmbeddedNote[] = items.map(
-                ({ file, chunks, avgEmbedding }) => ({
-                    path: file.path,
-                    mtime: file.stat.mtime,
-                    chunks: [...chunks],
-                    avgEmbedding,
-                }),
-            );
-
-            try {
-                await provider.putBatch<EmbeddedNote>(dbEntries);
-            } catch (error) {
-                logger.errorLog('Batch update failed:', error);
-            }
-        },
-
-        commitRemove: async (path) => {
-            cachedStore = StoreOps.remove(cachedStore, path);
-            try {
-                await provider.deleteByKey(path);
-            } catch (error) {
-                logger.errorLog(`Failed to remove vector for ${path}:`, error);
-            }
-        },
-
-        commitRemoveBatch: async (paths) => {
-            if (paths.length === 0) return;
-
-            paths.forEach((path) => {
-                cachedStore = StoreOps.remove(cachedStore, path);
-            });
-
-            try {
-                await provider.deleteBatch(paths);
-            } catch (error) {
-                logger.errorLog('Batch removal failed:', error);
-            }
-        },
-
-        clear: async () => {
-            cachedStore = { entries: {} };
-            try {
-                await provider.clear();
-            } catch (error) {
-                logger.errorLog('Failed to clear VectorStore:', error);
-            }
-        },
+        try {
+            await this.provider.putBatch<EmbeddedNote>(dbEntries);
+        } catch (error) {
+            logger.errorLog('Batch update failed:', error);
+        }
     };
-};
+
+    public commitRemove = async (path: string): Promise<void> => {
+        this.cachedStore = StoreOps.remove(this.cachedStore, path);
+        try {
+            await this.provider.deleteByKey(path);
+        } catch (error) {
+            logger.errorLog(`Failed to remove vector for ${path}:`, error);
+        }
+    };
+
+    public commitRemoveBatch = async (
+        paths: readonly string[],
+    ): Promise<void> => {
+        if (paths.length === 0) return;
+
+        paths.forEach((path) => {
+            this.cachedStore = StoreOps.remove(this.cachedStore, path);
+        });
+
+        try {
+            await this.provider.deleteBatch(paths);
+        } catch (error) {
+            logger.errorLog('Batch removal failed:', error);
+        }
+    };
+
+    public clear = async (): Promise<void> => {
+        this.cachedStore = { entries: {} };
+        try {
+            await this.provider.clear();
+        } catch (error) {
+            logger.errorLog('Failed to clear VectorStore:', error);
+        }
+    };
+}

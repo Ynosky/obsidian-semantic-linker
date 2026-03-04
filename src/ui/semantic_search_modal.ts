@@ -77,7 +77,7 @@ export class SemanticSearchModal extends SuggestModal<SemanticSearchResult> {
         this.registerKeyHandlers();
     }
 
-    private registerKeyHandlers() {
+    private registerKeyHandlers = () => {
         this.scope.register(['Mod'], 'Enter', (evt) => {
             this.selectActiveSuggestion(evt);
             return false;
@@ -87,7 +87,7 @@ export class SemanticSearchModal extends SuggestModal<SemanticSearchResult> {
             this.selectActiveSuggestion(evt);
             return false;
         });
-    }
+    };
 
     async getSuggestions(query: string): Promise<SemanticSearchResult[]> {
         this.state.lastQuery = query;

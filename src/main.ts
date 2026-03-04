@@ -7,22 +7,11 @@ import {
     TFile,
     type WorkspaceLeaf,
 } from 'obsidian';
-import {
-    createExclusionService,
-    createTagManager,
-    type ExclusionService,
-    type TagManager,
-} from 'services/filtering';
-import { createIndexingService, type IndexingService } from 'services/indexing';
-import { createOllamaService, type OllamaService } from 'services/ollama';
-import {
-    createStatusStoreService,
-    type StatusService,
-} from 'services/status_store';
-import {
-    createVectorStoreService,
-    type VectorStoreService,
-} from 'services/vector_store';
+import { ExclusionService, TagManager } from 'services/filtering';
+import { IndexingService } from 'services/indexing';
+import { OllamaService } from 'services/ollama';
+import { StatusService } from 'services/status_store';
+import { VectorStoreService } from 'services/vector_store';
 import { logger } from 'shared/notify';
 import { getVaultHash } from 'shared/utils';
 import {
@@ -78,11 +67,11 @@ export default class MainPlugin extends Plugin {
         );
     }
 
-    private async initState(dbName: string) {
+    private initState = async (dbName: string) => {
         const loadedData = (await this.loadData()) as SettingParams | null;
         this.settings = Object.assign({}, DEFAULT_SETTINGS, loadedData ?? {});
 
-        this.ollamaService = createOllamaService(this.settings.ollamaUrl);
+        this.ollamaService = new OllamaService(this.settings.ollamaUrl);
         void this.ollamaService.fetchModels().then((result) => {
             if (!result.ok) {
                 logger.errorLog(
@@ -93,24 +82,24 @@ export default class MainPlugin extends Plugin {
         });
 
         const triggerRefresh = () => this.events.trigger(EVENT_REFRESH_VIEWS);
-        this.statusService = createStatusStoreService(dbName, triggerRefresh);
+        this.statusService = new StatusService(dbName, triggerRefresh);
         await this.statusService.load();
 
-        this.vectorStoreService = createVectorStoreService(dbName);
+        this.vectorStoreService = new VectorStoreService(dbName);
         await this.vectorStoreService.load();
 
-        this.tagManager = createTagManager();
+        this.tagManager = new TagManager();
 
         this.app.workspace.onLayoutReady(() => {
             this.tagManager.initialize(this.app.vault, this.app.metadataCache);
         });
 
-        this.exclusionService = createExclusionService({
+        this.exclusionService = new ExclusionService({
             settings: () => this.settings,
             tags: this.tagManager,
         });
 
-        this.indexingService = createIndexingService(
+        this.indexingService = new IndexingService(
             this.app.vault,
             this.ollamaService,
             this.vectorStoreService,
@@ -120,9 +109,9 @@ export default class MainPlugin extends Plugin {
             () => this.isTyping,
             () => this.events.trigger(EVENT_REFRESH_VIEWS),
         );
-    }
+    };
 
-    private registerMetadataEvents() {
+    private registerMetadataEvents = () => {
         this.registerEvent(
             this.app.metadataCache.on('changed', (file, _data, cache) => {
                 this.tagManager.updateFile(file, cache);
@@ -149,9 +138,9 @@ export default class MainPlugin extends Plugin {
                 }
             }),
         );
-    }
+    };
 
-    private registerInlineViews() {
+    private registerInlineViews = () => {
         this.app.workspace.onLayoutReady(() => {
             this.app.workspace.iterateAllLeaves((leaf) => {
                 if (leaf.view instanceof MarkdownView) {
@@ -171,9 +160,9 @@ export default class MainPlugin extends Plugin {
                 });
             }),
         );
-    }
+    };
 
-    private attachInlineView(view: MarkdownView) {
+    private attachInlineView = (view: MarkdownView) => {
         if (!this.settings.showInlineSimilarNotes) {
             return;
         }
@@ -185,9 +174,9 @@ export default class MainPlugin extends Plugin {
         const inlineView = new InlineSemanticView(view, this);
         this.inlineViews.set(view, inlineView);
         inlineView.load();
-    }
+    };
 
-    private registerCommands() {
+    private registerCommands = () => {
         this.addCommand({
             id: 'show-sidebar-view',
             name: 'Show sidebar view',
@@ -253,9 +242,9 @@ export default class MainPlugin extends Plugin {
                 );
             },
         });
-    }
+    };
 
-    private registerEditorEvents() {
+    private registerEditorEvents = () => {
         this.registerEvent(
             this.app.workspace.on('editor-change', () => {
                 this.isTyping = true;
@@ -270,9 +259,9 @@ export default class MainPlugin extends Plugin {
                 }, 1000);
             }),
         );
-    }
+    };
 
-    private registerVaultEvents() {
+    private registerVaultEvents = () => {
         this.registerEvent(
             this.app.vault.on('modify', (f) => {
                 if (f instanceof TFile && !this.isTyping) {
@@ -303,17 +292,17 @@ export default class MainPlugin extends Plugin {
                 }
             }),
         );
-    }
+    };
 
-    async saveSettings() {
+    saveSettings = async () => {
         await this.saveData(this.settings);
         this.ollamaService.reconfigure(this.settings.ollamaUrl);
         this.exclusionService.refresh();
         this.indexingService.reconfigureDebounce();
         this.refreshInlineViews();
-    }
+    };
 
-    private refreshInlineViews() {
+    private refreshInlineViews = () => {
         if (this.settings.showInlineSimilarNotes) {
             this.app.workspace.iterateAllLeaves((leaf) => {
                 if (leaf.view instanceof MarkdownView) {
@@ -331,9 +320,9 @@ export default class MainPlugin extends Plugin {
                 }
             });
         }
-    }
+    };
 
-    private async openView() {
+    private openView = async () => {
         const { workspace } = this.app;
         let leaf = workspace.getLeavesOfType(VIEW_TYPE_SEMANTIC_LINKER)[0];
 
@@ -350,9 +339,9 @@ export default class MainPlugin extends Plugin {
         }
 
         void workspace.revealLeaf(leaf);
-    }
+    };
 
-    getLinkedFiles(file: TFile): Set<string> {
+    getLinkedFiles = (file: TFile): Set<string> => {
         const links = this.app.metadataCache.getFileCache(file)?.links ?? [];
         const paths = new Set<string>();
 
@@ -365,7 +354,7 @@ export default class MainPlugin extends Plugin {
         }
 
         return paths;
-    }
+    };
 
     get getIsTyping() {
         return this.isTyping;

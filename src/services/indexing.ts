@@ -24,9 +24,10 @@ type DocumentEmbeddingResult = {
     readonly averageEmbedding: Vector;
 };
 
-type ProgressCounter = {
-    readonly increment: (count?: number) => number;
-    readonly get: () => number;
+type IndexProgress = {
+    readonly total: number;
+    readonly processed: number;
+    readonly currentFile: string;
 };
 
 type TryEmbedResult =
@@ -37,133 +38,318 @@ type TryEmbedResult =
           error?: string;
       };
 
-type IndexProgress = {
-    readonly total: number;
-    readonly processed: number;
-    readonly currentFile: string;
-};
+export class IndexingService {
+    private active = false;
+    private stopping = false;
+    private autoIndexFn: ((file: TFile) => void) | null = null;
 
-export type IndexingService = {
-    readonly isBusy: () => boolean;
-    readonly stop: () => void;
-    readonly runFullIndex: (force?: boolean) => Promise<void>;
-    readonly indexFile: (file: TFile, showNotice?: boolean) => Promise<void>;
-    readonly queueAutoIndex: (file: TFile) => void;
-    readonly handleDelete: (file: TFile) => Promise<void>;
-    readonly handleRename: (file: TFile, oldPath: string) => Promise<void>;
-    readonly clearIndex: () => Promise<void>;
-    readonly applyExclusion: () => Promise<void>;
-    readonly reconfigureDebounce: () => void;
-    readonly getEmbeddings: (text: string) => Promise<Result<SearchQuery>>;
-};
+    constructor(
+        private vault: Vault,
+        private ollama: OllamaService,
+        private vector: VectorStoreService,
+        private status: StatusService,
+        private exclusion: ExclusionService,
+        private getSettings: () => SettingParams,
+        private getIsTyping: () => boolean,
+        private onIndexFinished: () => void,
+    ) {}
 
-const createProgressCounter = (): ProgressCounter => {
-    let count = 0;
-    return {
-        increment: (c = 1) => {
-            count += c;
-            return count;
-        },
-        get: () => count,
+    public isBusy = (): boolean => {
+        return this.active;
     };
-};
 
-const yieldToMain = (): Promise<void> => {
-    if (typeof MessageChannel !== 'undefined') {
-        return new Promise((resolve) => {
-            const channel = new MessageChannel();
-            channel.port1.onmessage = () => {
-                channel.port1.onmessage = null;
-                resolve();
-            };
-            channel.port2.postMessage(null);
-        });
-    }
-    return new Promise((resolve) => setTimeout(resolve, 0));
-};
+    public stop = (): void => {
+        this.stopping = true;
+    };
 
-const accumulateVector = (
-    sumVec: Float32Array,
-    vec: readonly number[] | Float32Array,
-    weight: number,
-    dim: number,
-) => {
-    for (let d = 0; d < dim; d++) {
-        const val = vec[d];
-        if (typeof val === 'number') {
-            sumVec[d] = (sumVec[d] ?? 0) + val * weight;
-        }
-    }
-};
+    public runFullIndex = async (force = false): Promise<void> => {
+        if (this.active) return;
 
-const normalizeVector = (
-    sumVec: Float32Array,
-    invTotalWeight: number,
-    dim: number,
-): number[] => {
-    const result = new Array<number>(dim);
-    for (let d = 0; d < dim; d++) {
-        const val = sumVec[d];
-        result[d] = (val ?? 0) * invTotalWeight;
-    }
-    return result;
-};
+        const files = this.getFilesToIndex(force);
 
-const averageEmbeddings = async (
-    embeddings: readonly (readonly number[] | Float32Array)[],
-    introWeight = 1.0,
-): Promise<number[]> => {
-    const numVec = embeddings.length;
-    if (numVec === 0) return [];
-
-    const firstVec = embeddings[0];
-    if (!firstVec) return [];
-    if (numVec === 1) return Array.from(firstVec);
-
-    const dim = firstVec.length;
-    const totalWeight = numVec - 1 + introWeight;
-    const sumVec = new Float32Array(dim);
-    const CHECK_INTERVAL = 50;
-
-    let lastYieldTime = Date.now();
-
-    for (let i = 0; i < numVec; i++) {
-        const vec = embeddings[i];
-        if (vec) {
-            const weight = i === 0 ? introWeight : 1.0;
-            accumulateVector(sumVec, vec, weight, dim);
+        if (force) {
+            logger.info('Clearing existing index for full re-indexing...');
+            await this.vector.clear();
         }
 
-        if (i % CHECK_INTERVAL === 0) {
-            const now = Date.now();
-            if (now - lastYieldTime > 50) {
-                await yieldToMain();
-                lastYieldTime = now;
+        if (files.length === 0) {
+            logger.info('Index is already up to date.');
+            return;
+        }
+
+        this.active = true;
+        this.stopping = false;
+
+        const notice = logger.progress(
+            force ? 'Re-indexing all notes...' : 'Updating index...',
+        );
+
+        try {
+            await this.performIndexingLoop(files, notice);
+            await this.updateStats();
+        } catch (e) {
+            logger.error('Fatal error during indexing', e);
+        } finally {
+            this.active = false;
+            this.stopping = false;
+            notice.hide();
+            logger.info('Indexing finished.');
+        }
+    };
+
+    public indexFile = async (
+        file: TFile,
+        showNotice = false,
+    ): Promise<void> => {
+        if (file.extension !== 'md') return;
+
+        const result = await this.createEmbeddingForFile(file);
+
+        if (result.ok) {
+            if (result.value.chunks.length > 0) {
+                await this.vector.commitUpsert(
+                    file,
+                    result.value.chunks,
+                    result.value.avgEmbedding,
+                );
+                await this.updateStats();
+                if (showNotice) logger.info(`Indexed: ${file.basename}`);
+            }
+        } else {
+            logger.errorLog(`Failed to index ${file.path}: ${result.error}`);
+        }
+    };
+
+    public queueAutoIndex = (file: TFile): void => {
+        if (!this.autoIndexFn) {
+            this.autoIndexFn = debounce((f: TFile) => {
+                if (this.getIsTyping()) {
+                    this.autoIndexFn?.(f);
+                    return;
+                }
+                void this.indexFile(f);
+            }, this.getSettings().fileProcessingDelay);
+        }
+        this.autoIndexFn(file);
+    };
+
+    public handleDelete = async (file: TFile): Promise<void> => {
+        await this.vector.commitRemove(file.path);
+        await this.updateStats();
+    };
+
+    public handleRename = async (
+        file: TFile,
+        oldPath: string,
+    ): Promise<void> => {
+        await this.vector.commitRemove(oldPath);
+        await this.indexFile(file);
+    };
+
+    public clearIndex = async (): Promise<void> => {
+        await this.vector.clear();
+        await this.updateStats();
+    };
+
+    public applyExclusion = async (): Promise<void> => {
+        const currentStore = this.vector.getState();
+        const toRemove: string[] = [];
+
+        for (const path of Object.keys(currentStore.entries)) {
+            const file = this.vault.getAbstractFileByPath(path);
+            if (file instanceof TFile && this.exclusion.isExcluded(file)) {
+                toRemove.push(path);
             }
         }
-    }
 
-    return normalizeVector(sumVec, 1.0 / totalWeight, dim);
-};
+        if (toRemove.length > 0) {
+            await this.vector.commitRemoveBatch(toRemove);
+            await this.updateStats();
+            logger.info(
+                `Removed ${toRemove.length} excluded files from index.`,
+            );
+        }
+    };
 
-const updateNotice = (notice: Notice, p: IndexProgress) => {
-    const pct = p.total > 0 ? Math.round((p.processed / p.total) * 100) : 0;
-    notice.setMessage(
-        `Indexing: ${pct}% (${p.processed}/${p.total})\n${p.currentFile}`,
-    );
-};
+    public reconfigureDebounce = (): void => {
+        this.autoIndexFn = null;
+    };
 
-const createDocumentEmbedder = (
-    ollama: OllamaService,
-    getSettings: () => SettingParams,
-    getStatus: () => { modelContextLength?: number },
-) => {
-    const tryEmbedSingleBatch = async (
+    public getEmbeddings = async (
+        text: string,
+    ): Promise<Result<SearchQuery>> => {
+        const result = await this.embedder(text, 'Search Query');
+        if (result.ok) {
+            return {
+                ok: true,
+                value: {
+                    avg: result.value.averageEmbedding,
+                    chunks: result.value.chunks.map((c) => c.embedding),
+                },
+            };
+        }
+        return { ok: false, error: result.error };
+    };
+
+    private updateStats = async (): Promise<void> => {
+        const settings = this.getSettings();
+        await this.status.update({
+            lastIndexTime: Date.now(),
+            lastIndexCount: Object.keys(this.vector.getState().entries).length,
+            lastModelUsed: settings.ollamaModel,
+        });
+        this.onIndexFinished();
+    };
+
+    private createEmbeddingForFile = async (
+        file: TFile,
+    ): Promise<Result<VectorStoreBatchItem>> => {
+        try {
+            const settings = this.getSettings();
+            let content = await this.vault.read(file);
+
+            if (!settings.includeFrontmatter) {
+                content = cleanText(content, 'frontmatter');
+            }
+            content = cleanText(content, 'semantic');
+
+            if (content.trim().length === 0) {
+                return {
+                    ok: true,
+                    value: { file, chunks: [], avgEmbedding: [] },
+                };
+            }
+
+            const result = await this.embedder(
+                content,
+                getTitleFromPath(file.path),
+            );
+
+            if (!result.ok) {
+                return { ok: false, error: result.error };
+            }
+
+            return {
+                ok: true,
+                value: {
+                    file,
+                    chunks: result.value.chunks,
+                    avgEmbedding: result.value.averageEmbedding,
+                },
+            };
+        } catch (e) {
+            return { ok: false, error: String(e) };
+        }
+    };
+
+    private performIndexingLoop = async (
+        files: readonly TFile[],
+        notice: Notice,
+    ): Promise<void> => {
+        let processedCount = 0;
+        const total = files.length;
+        const parallelCount = this.getSettings().parallelIndexingCount || 1;
+
+        for (let i = 0; i < total; i += parallelCount) {
+            if (this.stopping) break;
+            const batch = files.slice(i, i + parallelCount);
+
+            const tasks = batch.map(async (file) => {
+                const result = await this.createEmbeddingForFile(file);
+                processedCount++;
+                this.updateNotice(notice, {
+                    total,
+                    processed: processedCount,
+                    currentFile: file.path,
+                });
+                return { file, result };
+            });
+
+            const resultsWithFile = await Promise.all(tasks);
+
+            const validItems: VectorStoreBatchItem[] = [];
+            for (const { file, result } of resultsWithFile) {
+                if (result.ok) {
+                    if (result.value.chunks.length > 0) {
+                        validItems.push(result.value);
+                    }
+                } else {
+                    logger.errorLog(
+                        `Failed to process ${file.path}: ${result.error}`,
+                    );
+                }
+            }
+
+            if (validItems.length > 0) {
+                await this.vector.commitUpsertBatch(validItems);
+            }
+        }
+    };
+
+    private getFilesToIndex = (force: boolean): readonly TFile[] => {
+        return this.vault
+            .getMarkdownFiles()
+            .filter(
+                (f) =>
+                    !this.exclusion.isExcluded(f) &&
+                    (force || StoreOps.isStale(this.vector.getState(), f)),
+            );
+    };
+
+    private embedder = async (
+        text: string,
+        title: string,
+    ): Promise<Result<DocumentEmbeddingResult>> => {
+        const settings = this.getSettings();
+        const maxTokens = this.status.getState().modelContextLength || 512;
+        let currentLimit = maxTokens;
+        const maxRetries = settings.maxRetries || 5;
+
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            const result = await this.tryEmbedSingleBatch(
+                text,
+                title,
+                currentLimit,
+            );
+
+            if (result.success) {
+                return { ok: true, value: result.result };
+            }
+
+            if (result.reason === 'context_limit') {
+                currentLimit = Math.floor(
+                    currentLimit * settings.reductionRatio,
+                );
+                logger.debug(
+                    `Embedding failed (attempt ${
+                        attempt + 1
+                    }), reducing limit to ${currentLimit}. Error: ${
+                        result.error
+                    }`,
+                );
+                continue;
+            }
+
+            if (result.reason === 'other') {
+                return {
+                    ok: false,
+                    error: result.error || 'Unknown error',
+                };
+            }
+        }
+
+        return {
+            ok: false,
+            error: 'Failed to embed after retries due to context limits',
+        };
+    };
+
+    private tryEmbedSingleBatch = async (
         text: string,
         title: string,
         limit: number,
     ): Promise<TryEmbedResult> => {
-        const settings = getSettings();
+        const settings = this.getSettings();
         const rawChunks = await createChunks(
             text,
             limit,
@@ -180,7 +366,10 @@ const createDocumentEmbedder = (
         }
 
         const chunkTexts = rawChunks.map((c) => c.text);
-        const result = await ollama.embed(settings.ollamaModel, chunkTexts);
+        const result = await this.ollama.embed(
+            settings.ollamaModel,
+            chunkTexts,
+        );
 
         if (!result.ok) {
             return {
@@ -218,7 +407,7 @@ const createDocumentEmbedder = (
             };
         });
 
-        const average = await averageEmbeddings(vectors);
+        const average = await this.averageEmbeddings(vectors);
 
         return {
             success: true,
@@ -229,305 +418,88 @@ const createDocumentEmbedder = (
         };
     };
 
-    return async (
-        text: string,
-        title: string,
-    ): Promise<Result<DocumentEmbeddingResult>> => {
-        const settings = getSettings();
-        const maxTokens = getStatus().modelContextLength || 512;
-        let currentLimit = maxTokens;
-        const maxRetries = settings.maxRetries || 5;
+    private averageEmbeddings = async (
+        embeddings: readonly (readonly number[] | Float32Array)[],
+        introWeight = 1.0,
+    ): Promise<number[]> => {
+        const numVec = embeddings.length;
+        if (numVec === 0) return [];
 
-        for (let attempt = 0; attempt < maxRetries; attempt++) {
-            const result = await tryEmbedSingleBatch(text, title, currentLimit);
+        const firstVec = embeddings[0];
+        if (!firstVec) return [];
+        if (numVec === 1) return Array.from(firstVec);
 
-            if (result.success) {
-                return { ok: true, value: result.result };
+        const dim = firstVec.length;
+        const totalWeight = numVec - 1 + introWeight;
+        const sumVec = new Float32Array(dim);
+        const CHECK_INTERVAL = 50;
+
+        let lastYieldTime = Date.now();
+
+        for (let i = 0; i < numVec; i++) {
+            const vec = embeddings[i];
+            if (vec) {
+                const weight = i === 0 ? introWeight : 1.0;
+                this.accumulateVector(sumVec, vec, weight, dim);
             }
 
-            if (result.reason === 'context_limit') {
-                currentLimit = Math.floor(
-                    currentLimit * settings.reductionRatio,
-                );
-                logger.debug(
-                    `Embedding failed (attempt ${attempt + 1}), reducing limit to ${currentLimit}. Error: ${result.error}`,
-                );
-                continue;
-            }
-
-            if (result.reason === 'other') {
-                return {
-                    ok: false,
-                    error: result.error || 'Unknown error',
-                };
+            if (i % CHECK_INTERVAL === 0) {
+                const now = Date.now();
+                if (now - lastYieldTime > 50) {
+                    await this.yieldToMain();
+                    lastYieldTime = now;
+                }
             }
         }
 
-        return {
-            ok: false,
-            error: 'Failed to embed after retries due to context limits',
-        };
-    };
-};
-
-export const createIndexingService = (
-    vault: Vault,
-    ollama: OllamaService,
-    vector: VectorStoreService,
-    status: StatusService,
-    exclusion: ExclusionService,
-    getSettings: () => SettingParams,
-    getIsTyping: () => boolean,
-    onIndexFinished: () => void,
-): IndexingService => {
-    let active = false;
-    let stopping = false;
-    let autoIndexFn: ((file: TFile) => void) | null = null;
-
-    const embedder = createDocumentEmbedder(ollama, getSettings, () =>
-        status.getState(),
-    );
-
-    const updateStats = async () => {
-        const settings = getSettings();
-        await status.update({
-            lastIndexTime: Date.now(),
-            lastIndexCount: Object.keys(vector.getState().entries).length,
-            lastModelUsed: settings.ollamaModel,
-        });
-        onIndexFinished();
+        return this.normalizeVector(sumVec, 1.0 / totalWeight, dim);
     };
 
-    const createEmbeddingForFile = async (
-        file: TFile,
-    ): Promise<Result<VectorStoreBatchItem>> => {
-        try {
-            const settings = getSettings();
-            let content = await vault.read(file);
-
-            if (!settings.includeFrontmatter) {
-                content = cleanText(content, 'frontmatter');
+    private accumulateVector = (
+        sumVec: Float32Array,
+        vec: readonly number[] | Float32Array,
+        weight: number,
+        dim: number,
+    ): void => {
+        for (let d = 0; d < dim; d++) {
+            const val = vec[d];
+            if (typeof val === 'number') {
+                sumVec[d] = (sumVec[d] ?? 0) + val * weight;
             }
-            content = cleanText(content, 'semantic');
-
-            if (content.trim().length === 0) {
-                return {
-                    ok: true,
-                    value: { file, chunks: [], avgEmbedding: [] },
-                };
-            }
-
-            const result = await embedder(content, getTitleFromPath(file.path));
-
-            if (!result.ok) {
-                return { ok: false, error: result.error };
-            }
-
-            return {
-                ok: true,
-                value: {
-                    file,
-                    chunks: result.value.chunks,
-                    avgEmbedding: result.value.averageEmbedding,
-                },
-            };
-        } catch (e) {
-            return { ok: false, error: String(e) };
         }
     };
 
-    const processBatch = async (
-        batch: readonly TFile[],
-        total: number,
-        processed: ProgressCounter,
-        notice: Notice,
-    ) => {
-        const tasks = batch.map(async (file) => {
-            const result = await createEmbeddingForFile(file);
+    private normalizeVector = (
+        sumVec: Float32Array,
+        invTotalWeight: number,
+        dim: number,
+    ): number[] => {
+        const result = new Array<number>(dim);
+        for (let d = 0; d < dim; d++) {
+            const val = sumVec[d];
+            result[d] = (val ?? 0) * invTotalWeight;
+        }
+        return result;
+    };
 
-            processed.increment();
-            updateNotice(notice, {
-                total,
-                processed: processed.get(),
-                currentFile: file.path,
+    private yieldToMain = async (): Promise<void> => {
+        if (typeof MessageChannel !== 'undefined') {
+            return new Promise((resolve) => {
+                const channel = new MessageChannel();
+                channel.port1.onmessage = () => {
+                    channel.port1.onmessage = null;
+                    resolve();
+                };
+                channel.port2.postMessage(null);
             });
-
-            return { file, result };
-        });
-        const resultsWithFile = await Promise.all(tasks);
-
-        const validItems: VectorStoreBatchItem[] = [];
-        for (const { file, result } of resultsWithFile) {
-            if (result.ok) {
-                if (result.value.chunks.length > 0) {
-                    validItems.push(result.value);
-                }
-            } else {
-                logger.errorLog(
-                    `Failed to process ${file.path}: ${result.error}`,
-                );
-            }
         }
-
-        if (validItems.length > 0) {
-            await vector.commitUpsertBatch(validItems);
-        }
+        return new Promise((resolve) => setTimeout(resolve, 0));
     };
 
-    const indexFile = async (file: TFile, showNotice = false) => {
-        if (file.extension !== 'md') return;
-
-        const result = await createEmbeddingForFile(file);
-
-        if (result.ok) {
-            if (result.value.chunks.length > 0) {
-                await vector.commitUpsert(
-                    file,
-                    result.value.chunks,
-                    result.value.avgEmbedding,
-                );
-                await updateStats();
-                if (showNotice) logger.info(`Indexed: ${file.basename}`);
-            }
-        } else {
-            logger.errorLog(`Failed to index ${file.path}: ${result.error}`);
-        }
-    };
-
-    const getFilesToIndex = (force: boolean): readonly TFile[] => {
-        return vault
-            .getMarkdownFiles()
-            .filter(
-                (f) =>
-                    !exclusion.isExcluded(f) &&
-                    (force || StoreOps.isStale(vector.getState(), f)),
-            );
-    };
-
-    const performIndexingLoop = async (
-        files: readonly TFile[],
-        notice: Notice,
-    ): Promise<void> => {
-        const processed = createProgressCounter();
-        const parallelCount = getSettings().parallelIndexingCount || 1;
-
-        for (let i = 0; i < files.length; i += parallelCount) {
-            if (stopping) break;
-            const batch = files.slice(i, i + parallelCount);
-            await processBatch(batch, files.length, processed, notice);
-        }
-    };
-
-    const runFullIndex = async (force = false) => {
-        if (active) return;
-
-        const files = getFilesToIndex(force);
-
-        if (force) {
-            logger.info('Clearing existing index for full re-indexing...');
-            await vector.clear();
-        }
-
-        if (files.length === 0) {
-            logger.info('Index is already up to date.');
-            return;
-        }
-
-        active = true;
-        stopping = false;
-
-        const notice = logger.progress(
-            force ? 'Re-indexing all notes...' : 'Updating index...',
+    private updateNotice = (notice: Notice, p: IndexProgress): void => {
+        const pct = p.total > 0 ? Math.round((p.processed / p.total) * 100) : 0;
+        notice.setMessage(
+            `Indexing: ${pct}% (${p.processed}/${p.total})\n${p.currentFile}`,
         );
-
-        try {
-            await performIndexingLoop(files, notice);
-            await updateStats();
-        } catch (e) {
-            logger.error('Fatal error during indexing', e);
-        } finally {
-            active = false;
-            stopping = false;
-            notice.hide();
-            logger.info('Indexing finished.');
-        }
     };
-
-    return {
-        isBusy: () => active,
-
-        stop: () => {
-            stopping = true;
-        },
-
-        runFullIndex,
-
-        indexFile,
-
-        queueAutoIndex: (file) => {
-            if (!autoIndexFn) {
-                autoIndexFn = debounce((f: TFile) => {
-                    if (getIsTyping()) {
-                        autoIndexFn?.(f);
-                        return;
-                    }
-                    void indexFile(f);
-                }, getSettings().fileProcessingDelay);
-            }
-            autoIndexFn(file);
-        },
-
-        handleDelete: async (file) => {
-            await vector.commitRemove(file.path);
-            await updateStats();
-        },
-
-        handleRename: async (file, oldPath) => {
-            await vector.commitRemove(oldPath);
-            await indexFile(file);
-        },
-
-        clearIndex: async () => {
-            await vector.clear();
-            await updateStats();
-        },
-
-        applyExclusion: async () => {
-            const currentStore = vector.getState();
-            const toRemove: string[] = [];
-
-            for (const path of Object.keys(currentStore.entries)) {
-                const file = vault.getAbstractFileByPath(path);
-                if (file instanceof TFile && exclusion.isExcluded(file)) {
-                    toRemove.push(path);
-                }
-            }
-
-            if (toRemove.length > 0) {
-                await vector.commitRemoveBatch(toRemove);
-                await updateStats();
-                logger.info(
-                    `Removed ${toRemove.length} excluded files from index.`,
-                );
-            }
-        },
-
-        reconfigureDebounce: () => {
-            autoIndexFn = null;
-        },
-
-        getEmbeddings: async (text) => {
-            const result = await embedder(text, 'Search Query');
-            if (result.ok) {
-                return {
-                    ok: true,
-                    value: {
-                        avg: result.value.averageEmbedding,
-                        chunks: result.value.chunks.map((c) => c.embedding),
-                    },
-                };
-            }
-            return { ok: false, error: result.error };
-        },
-    };
-};
+}

@@ -6,25 +6,6 @@ export type TagSet = Set<string>;
 export type FileTagMap = Map<string, TagSet>;
 export type Predicate = (file: TFile) => boolean;
 
-export type TagManager = {
-    readonly updateFile: (file: TFile, cache: CachedMetadata) => void;
-    readonly removeFile: (path: string) => void;
-    readonly renameFile: (oldPath: string, newPath: string) => void;
-    readonly getFileTagMap: () => FileTagMap;
-    readonly getGlobalTags: () => TagSet;
-    readonly initialize: (vault: Vault, metadataCache: MetadataCache) => void;
-};
-
-export type ExclusionService = {
-    readonly isExcluded: Predicate;
-    readonly refresh: () => void;
-};
-
-type ExclusionContext = {
-    readonly settings: () => SettingParams;
-    readonly tags: TagManager;
-};
-
 const normalizeTag = (tag: string): string => tag.replace(/^#/, '');
 
 const getFrontmatterTagArray = (
@@ -65,118 +46,124 @@ const extractTags = (cache: CachedMetadata): TagSet => {
     return tags;
 };
 
-const createPathMatcher = (patterns: readonly string[]): Predicate => {
-    if (patterns.length === 0) {
-        return () => false;
-    }
+export class TagManager {
+    private fileTagMap: FileTagMap = new Map();
+    private globalTagCache: TagSet = new Set();
+    private isCacheDirty = true;
 
-    const ig = ignore().add([...patterns]);
-
-    return (file) => {
-        const path = file.path;
-        if (!path || path === '.') return false;
-        return ig.ignores(path);
+    public updateFile = (file: TFile, cache: CachedMetadata): void => {
+        const newTags = extractTags(cache);
+        this.fileTagMap.set(file.path, newTags);
+        this.isCacheDirty = true;
     };
-};
 
-export const createTagManager = (): TagManager => {
-    const fileTagMap: FileTagMap = new Map();
+    public removeFile = (path: string): void => {
+        if (this.fileTagMap.delete(path)) {
+            this.isCacheDirty = true;
+        }
+    };
 
-    let globalTagCache: TagSet = new Set();
-    let isCacheDirty = true;
+    public renameFile = (oldPath: string, newPath: string): void => {
+        const tags = this.fileTagMap.get(oldPath);
+        if (tags) {
+            this.fileTagMap.set(newPath, tags);
+            this.fileTagMap.delete(oldPath);
+        }
+    };
 
-    const rebuildGlobalCache = () => {
-        if (!isCacheDirty) return;
+    public getFileTagMap = (): FileTagMap => {
+        return this.fileTagMap;
+    };
+
+    public getGlobalTags = (): TagSet => {
+        this.rebuildGlobalCache();
+        return this.globalTagCache;
+    };
+
+    public initialize = (vault: Vault, metadataCache: MetadataCache): void => {
+        const files = vault.getMarkdownFiles();
+        this.fileTagMap.clear();
+
+        for (const file of files) {
+            const cache = metadataCache.getFileCache(file);
+            if (cache) {
+                this.fileTagMap.set(file.path, extractTags(cache));
+            }
+        }
+        this.isCacheDirty = true;
+    };
+
+    private rebuildGlobalCache = (): void => {
+        if (!this.isCacheDirty) return;
 
         const newSet: TagSet = new Set();
-        for (const tags of fileTagMap.values()) {
+        for (const tags of this.fileTagMap.values()) {
             for (const tag of tags) {
                 newSet.add(tag);
             }
         }
 
-        globalTagCache = newSet;
-        isCacheDirty = false;
+        this.globalTagCache = newSet;
+        this.isCacheDirty = false;
     };
+}
 
-    return {
-        updateFile: (file, cache) => {
-            const newTags = extractTags(cache);
-            fileTagMap.set(file.path, newTags);
-            isCacheDirty = true;
-        },
-
-        removeFile: (path) => {
-            if (fileTagMap.delete(path)) {
-                isCacheDirty = true;
-            }
-        },
-
-        renameFile: (oldPath, newPath) => {
-            const tags = fileTagMap.get(oldPath);
-            if (tags) {
-                fileTagMap.set(newPath, tags);
-                fileTagMap.delete(oldPath);
-            }
-        },
-
-        getFileTagMap: () => fileTagMap,
-
-        getGlobalTags: () => {
-            rebuildGlobalCache();
-            return globalTagCache;
-        },
-
-        initialize: (vault, metadataCache) => {
-            const files = vault.getMarkdownFiles();
-            fileTagMap.clear();
-
-            for (const file of files) {
-                const cache = metadataCache.getFileCache(file);
-                if (cache) {
-                    fileTagMap.set(file.path, extractTags(cache));
-                }
-            }
-            isCacheDirty = true;
-        },
-    };
+export type ExclusionContext = {
+    readonly settings: () => SettingParams;
+    readonly tags: TagManager;
 };
 
-export const createExclusionService = (
-    ctx: ExclusionContext,
-): ExclusionService => {
-    let cachedMatcher: Predicate | null = null;
+export class ExclusionService {
+    private cachedMatcher: Predicate | null = null;
+    private ctx: ExclusionContext;
 
-    const getMatcher = (): Predicate => {
-        if (cachedMatcher) return cachedMatcher;
+    constructor(ctx: ExclusionContext) {
+        this.ctx = ctx;
+    }
 
-        const settings = ctx.settings();
-        cachedMatcher = createPathMatcher(settings.excludePatterns);
-        return cachedMatcher;
+    public refresh = (): void => {
+        this.cachedMatcher = null;
     };
 
-    return {
-        refresh: () => {
-            cachedMatcher = null;
-        },
+    public isExcluded = (file: TFile): boolean => {
+        const matcher = this.getMatcher();
+        if (matcher(file)) {
+            return true;
+        }
 
-        isExcluded: (file) => {
-            const matcher = getMatcher();
-            if (matcher(file)) {
-                return true;
-            }
+        const { excludedTags } = this.ctx.settings();
+        if (excludedTags.length === 0) {
+            return false;
+        }
 
-            const { excludedTags } = ctx.settings();
-            if (excludedTags.length === 0) {
-                return false;
-            }
+        const fileTags = this.ctx.tags.getFileTagMap().get(file.path);
+        if (!fileTags || fileTags.size === 0) {
+            return false;
+        }
 
-            const fileTags = ctx.tags.getFileTagMap().get(file.path);
-            if (!fileTags || fileTags.size === 0) {
-                return false;
-            }
-
-            return excludedTags.some((tag) => fileTags.has(tag));
-        },
+        return excludedTags.some((tag) => fileTags.has(tag));
     };
-};
+
+    private getMatcher = (): Predicate => {
+        if (this.cachedMatcher) return this.cachedMatcher;
+
+        const settings = this.ctx.settings();
+        this.cachedMatcher = this.createPathMatcher(settings.excludePatterns);
+        return this.cachedMatcher;
+    };
+
+    private createPathMatcher = (patterns: readonly string[]): Predicate => {
+        if (patterns.length === 0) {
+            return () => false;
+        }
+
+        const ig = ignore().add([...patterns]);
+
+        return (file) => {
+            const path = file.path;
+            if (!path || path === '.') return false;
+            ig.ignores(path);
+            return ig.ignores(path);
+        };
+    };
+}

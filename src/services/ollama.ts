@@ -6,58 +6,7 @@ export type ModelMetadata = {
     readonly contextLength: number;
 };
 
-export type OllamaService = {
-    readonly getModels: () => readonly string[];
-    readonly fetchModels: () => Promise<Result<void>>;
-    readonly getModelMetadata: (
-        modelName: string,
-    ) => Promise<Result<ModelMetadata>>;
-    readonly embed: (
-        model: string,
-        input: string | string[],
-    ) => Promise<Result<EmbedResponse>>;
-    readonly reconfigure: (baseUrl: string) => void;
-    readonly abort: () => void;
-};
-
 type ModelInfo = ShowResponse['model_info'];
-
-const tryRequest = async <T>(
-    operation: () => Promise<T>,
-): Promise<Result<T>> => {
-    try {
-        const value = await operation();
-        return { ok: true, value };
-    } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { ok: false, error: message };
-    }
-};
-
-const extractContextLength = (
-    info: ModelInfo,
-    keys: readonly string[],
-    defaultValue: number,
-): number => {
-    if (!info) return defaultValue;
-
-    for (const key of keys) {
-        let val: unknown;
-
-        if (info instanceof Map) {
-            val = info.get(key);
-        } else {
-            const rec = info as Record<string, unknown>;
-            if (Object.hasOwn(rec, key)) {
-                val = rec[key];
-            }
-        }
-
-        if (typeof val === 'number') return val;
-    }
-
-    return defaultValue;
-};
 
 const CONTEXT_LENGTH_KEYS = [
     'llama.context_length',
@@ -67,57 +16,102 @@ const CONTEXT_LENGTH_KEYS = [
 
 const DEFAULT_CONTEXT_LENGTH = 512;
 
-export const createOllamaService = (initialBaseUrl: string): OllamaService => {
-    let client = new Ollama({ host: initialBaseUrl });
-    let cachedModels: string[] = [];
+export class OllamaService {
+    private client: Ollama;
+    private cachedModels: string[] = [];
 
-    return {
-        getModels: () => [...cachedModels],
+    constructor(baseUrl: string) {
+        this.client = new Ollama({ host: baseUrl });
+    }
 
-        reconfigure: (baseUrl) => {
-            client = new Ollama({ host: baseUrl });
-        },
+    public getModels = (): readonly string[] => [...this.cachedModels];
 
-        fetchModels: async (): Promise<Result<void>> => {
-            const res = await tryRequest(() => client.list());
-            if (res.ok) {
-                cachedModels = res.value.models.map((m) => m.name);
-                const voidValue: undefined = undefined;
-                return { ok: true, value: voidValue };
-            }
-            logger.errorLog('Failed to fetch models', res.error);
-            return res;
-        },
-
-        getModelMetadata: async (modelName) => {
-            const res = await tryRequest(() =>
-                client.show({ model: modelName }),
-            );
-            if (!res.ok) return res;
-
-            const length = extractContextLength(
-                res.value.model_info,
-                CONTEXT_LENGTH_KEYS,
-                DEFAULT_CONTEXT_LENGTH,
-            );
-
-            return {
-                ok: true,
-                value: { contextLength: length },
-            };
-        },
-
-        embed: (model, input) =>
-            tryRequest(() =>
-                client.embed({
-                    model,
-                    input,
-                    truncate: false,
-                }),
-            ),
-
-        abort: () => {
-            client.abort();
-        },
+    public reconfigure = (baseUrl: string): void => {
+        this.client = new Ollama({ host: baseUrl });
     };
-};
+
+    public fetchModels = async (): Promise<Result<void>> => {
+        const res = await this.tryRequest(() => this.client.list());
+        if (res.ok) {
+            this.cachedModels = res.value.models.map((m) => m.name);
+            return { ok: true, value: undefined };
+        }
+        logger.errorLog('Failed to fetch models', res.error);
+        return res;
+    };
+
+    public getModelMetadata = async (
+        modelName: string,
+    ): Promise<Result<ModelMetadata>> => {
+        const res = await this.tryRequest(() =>
+            this.client.show({ model: modelName }),
+        );
+        if (!res.ok) return res;
+
+        const length = this.extractContextLength(
+            res.value.model_info,
+            CONTEXT_LENGTH_KEYS,
+            DEFAULT_CONTEXT_LENGTH,
+        );
+
+        return {
+            ok: true,
+            value: { contextLength: length },
+        };
+    };
+
+    public embed = (
+        model: string,
+        input: string | string[],
+    ): Promise<Result<EmbedResponse>> => {
+        return this.tryRequest(() =>
+            this.client.embed({
+                model,
+                input,
+                truncate: false,
+            }),
+        );
+    };
+
+    public abort = (): void => {
+        this.client.abort();
+    };
+
+    private tryRequest = async <T>(
+        operation: () => Promise<T>,
+    ): Promise<Result<T>> => {
+        try {
+            const value = await operation();
+            return { ok: true, value };
+        } catch (error) {
+            const message =
+                error instanceof Error ? error.message : String(error);
+            return { ok: false, error: message };
+        }
+    };
+
+    private extractContextLength = (
+        info: ModelInfo,
+        keys: readonly string[],
+        defaultValue: number,
+    ): number => {
+        if (!info) return defaultValue;
+
+        for (const key of keys) {
+            let val: unknown;
+
+            if (info instanceof Map) {
+                val = info.get(key);
+            } else {
+                const rec = info as Record<string, unknown>;
+                if (Object.hasOwn(rec, key)) {
+                    val = rec[key];
+                }
+            }
+
+            if (typeof val === 'number') return val;
+        }
+
+        return defaultValue;
+    };
+}

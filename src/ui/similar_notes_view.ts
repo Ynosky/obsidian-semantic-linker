@@ -126,7 +126,7 @@ export class SimilarNotesView extends ItemView {
         void this.update(true);
     }
 
-    private async update(force = false) {
+    private update = async (force = false) => {
         const activeFile = this.app.workspace.getActiveFile();
         const viewFile =
             this.app.workspace.getActiveViewOfType(MarkdownView)?.file;
@@ -160,17 +160,17 @@ export class SimilarNotesView extends ItemView {
 
         const results = await searchByFile(this.plugin, file);
         this.render(results, file);
-    }
+    };
 
-    private renderNoFile() {
+    private renderNoFile = () => {
         this.contentEl.empty();
         this.contentEl.createDiv({
             text: 'No note selected.',
             cls: 'p-5 text-center text-[var(--text-muted)]',
         });
-    }
+    };
 
-    private renderExcluded(file: TFile) {
+    private renderExcluded = (file: TFile) => {
         this.contentEl.empty();
         this.contentEl.addClass('p-0', 'flex', 'flex-col');
 
@@ -188,9 +188,9 @@ export class SimilarNotesView extends ItemView {
         });
 
         this.lastRenderedPath = file.path;
-    }
+    };
 
-    private render(results: SemanticSearchResult[], file: TFile) {
+    private render = (results: SemanticSearchResult[], file: TFile) => {
         const { contentEl } = this;
         contentEl.empty();
         contentEl.addClass('p-0', 'flex', 'flex-col');
@@ -206,17 +206,17 @@ export class SimilarNotesView extends ItemView {
         for (const result of results) {
             this.renderResultItem(list, result);
         }
-    }
+    };
 
-    private renderActiveFileHeader(container: HTMLElement, file: TFile) {
+    private renderActiveFileHeader = (container: HTMLElement, file: TFile) => {
         const header = container.createDiv({
             text: file.basename,
             cls: 'py-1 px-2 border-b border-[var(--background-modifier-border)] bg-[var(--background-secondary-alt)] sticky top-0 z-10 text-sm font-medium truncate text-[var(--text-normal)] shrink-0 leading-normal',
         });
         header.setAttr('title', file.path);
-    }
+    };
 
-    private renderEmptyState(container: HTMLElement, file: TFile) {
+    private renderEmptyState = (container: HTMLElement, file: TFile) => {
         container.createDiv({
             text: 'No similar notes found.',
             cls: 'p-5 text-center text-[var(--text-muted)]',
@@ -229,12 +229,12 @@ export class SimilarNotesView extends ItemView {
 
         btn.onclick = async () =>
             await this.plugin.indexingService?.indexFile(file, true);
-    }
+    };
 
-    private renderResultItem(
+    private renderResultItem = (
         container: HTMLElement,
         result: SemanticSearchResult,
-    ) {
+    ) => {
         const item = container.createDiv({
             cls: 'flex flex-col !pl-0 bg-transparent rounded-none cursor-grab active:cursor-grabbing',
         });
@@ -250,14 +250,14 @@ export class SimilarNotesView extends ItemView {
         this.renderItemPreview(item, toggleBtn, result.path);
 
         enableDrag(item, title);
-    }
+    };
 
-    private renderItemHeader(
+    private renderItemHeader = (
         container: HTMLElement,
         title: string,
         path: string,
         similarity: number,
-    ): HTMLElement {
+    ): HTMLElement => {
         const header = container.createDiv({
             cls: 'flex items-center mt-1 mr-1 cursor-pointer rounded-[4px] transition-[background-color] duration-100 ease-in-out overflow-hidden hover:bg-[var(--background-modifier-hover)] active:bg-[var(--background-modifier-active)]',
         });
@@ -283,13 +283,13 @@ export class SimilarNotesView extends ItemView {
         toggleBtn.onclick = (e) => e.stopPropagation();
 
         return toggleBtn;
-    }
+    };
 
-    private renderItemPreview(
+    private renderItemPreview = (
         container: HTMLElement,
         toggleBtn: HTMLElement,
         path: string,
-    ) {
+    ) => {
         const previewEl = container.createDiv({
             cls: 'ml-6 mt-1 mb-2 p-3 bg-[var(--background-primary)] border border-[var(--background-modifier-border)] text-[var(--text-muted)] rounded text-xs leading-relaxed whitespace-pre-wrap break-words opacity-0 -translate-y-1 transition-[opacity,transform] duration-200 pointer-events-none',
         });
@@ -317,9 +317,9 @@ export class SimilarNotesView extends ItemView {
                 animatePreview(state);
             })();
         });
-    }
+    };
 
-    private async getFilePreviewText(path: string): Promise<string> {
+    private getFilePreviewText = async (path: string): Promise<string> => {
         const file = this.app.vault.getAbstractFileByPath(path);
         if (!(file instanceof TFile)) return 'File not found.';
 
@@ -328,13 +328,13 @@ export class SimilarNotesView extends ItemView {
             0,
             this.plugin.settings.previewLength,
         );
-    }
+    };
 
-    private openFile(path: string, evt: MouseEvent) {
+    private openFile = (path: string, evt: MouseEvent) => {
         const file = this.app.vault.getAbstractFileByPath(path);
         if (!(file instanceof TFile)) return;
 
         const { newLeaf, state } = createOpenState(evt);
         void this.app.workspace.getLeaf(newLeaf).openFile(file, state);
-    }
+    };
 }

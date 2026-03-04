@@ -97,13 +97,13 @@ export type VectorStore = {
  */
 export type SemanticSearchResult = {
     /** ヒットしたファイルのパス */
-    path: string;
+    readonly path: string;
     /** 類似度スコア */
-    similarity: number;
+    readonly similarity: number;
     /** 該当部分の開始行 */
-    startLine?: number;
+    readonly startLine?: number;
     /** 該当部分の終了行 */
-    endLine?: number;
+    readonly endLine?: number;
 };
 
 /**

@@ -50,7 +50,7 @@ export class SemanticLinkerSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings();
     };
 
-    private renderConnection(container: HTMLElement) {
+    private renderConnection = (container: HTMLElement) => {
         const group = new SettingGroup(container);
         group.setHeading('Connection');
 
@@ -102,9 +102,9 @@ export class SemanticLinkerSettingTab extends PluginSettingTab {
 
             this.renderModelMetadata(setting);
         });
-    }
+    };
 
-    private setupModelDropdown(d: DropdownComponent) {
+    private setupModelDropdown = (d: DropdownComponent) => {
         const models = this.plugin.ollamaService.getModels();
 
         if (models.length > 0) {
@@ -122,12 +122,12 @@ export class SemanticLinkerSettingTab extends PluginSettingTab {
                 }
             });
         }
-    }
+    };
 
-    private populateModelDropdown(
+    private populateModelDropdown = (
         dropdown: DropdownComponent,
         models: readonly string[],
-    ) {
+    ) => {
         const current = this.plugin.settings.ollamaModel;
         dropdown.selectEl.empty();
         dropdown.setDisabled(false);
@@ -155,9 +155,9 @@ export class SemanticLinkerSettingTab extends PluginSettingTab {
             }
             this.display();
         });
-    }
+    };
 
-    private renderModelMetadata(setting: Setting) {
+    private renderModelMetadata = (setting: Setting) => {
         const contextLength =
             this.plugin.statusService.getState().modelContextLength;
         if (!contextLength) return;
@@ -170,9 +170,9 @@ export class SemanticLinkerSettingTab extends PluginSettingTab {
             text: `Context length: ${contextLength} tokens`,
             cls: 'setting-item-description-spec text-[0.85em] text-[var(--text-muted)] mt-1',
         });
-    }
+    };
 
-    private renderIndex(container: HTMLElement) {
+    private renderIndex = (container: HTMLElement) => {
         const group = new SettingGroup(container);
         group.setHeading('Indexing');
 
@@ -180,9 +180,9 @@ export class SemanticLinkerSettingTab extends PluginSettingTab {
         this.addAutoIndexDelay(group);
         this.addFrontmatterToggle(group);
         this.addExclusionInput(group);
-    }
+    };
 
-    private addIndexControls(group: SettingGroup) {
+    private addIndexControls = (group: SettingGroup) => {
         group.addSetting((setting) => {
             const status = this.plugin.statusService.getState();
             const lastTime = status.lastIndexTime
@@ -213,9 +213,9 @@ export class SemanticLinkerSettingTab extends PluginSettingTab {
             this.attachReindexButton(setting);
             this.attachClearButton(setting);
         });
-    }
+    };
 
-    private attachReindexButton(setting: Setting) {
+    private attachReindexButton = (setting: Setting) => {
         const state = getButtonState(this.plugin.indexingService.isBusy());
 
         setting.addButton((btn) => {
@@ -251,9 +251,9 @@ export class SemanticLinkerSettingTab extends PluginSettingTab {
                     break;
             }
         });
-    }
+    };
 
-    private attachClearButton(setting: Setting) {
+    private attachClearButton = (setting: Setting) => {
         if (this.plugin.indexingService.isBusy()) return;
 
         setting.addExtraButton((btn) => {
@@ -265,9 +265,9 @@ export class SemanticLinkerSettingTab extends PluginSettingTab {
                     this.display();
                 });
         });
-    }
+    };
 
-    private addAutoIndexDelay(group: SettingGroup) {
+    private addAutoIndexDelay = (group: SettingGroup) => {
         group.addSetting((setting) => {
             setting
                 .setName('Auto-indexing delay (ms)')
@@ -290,9 +290,9 @@ export class SemanticLinkerSettingTab extends PluginSettingTab {
                         }),
                 );
         });
-    }
+    };
 
-    private addFrontmatterToggle(group: SettingGroup) {
+    private addFrontmatterToggle = (group: SettingGroup) => {
         group.addSetting((setting) => {
             setting
                 .setName('Include frontmatter (YAML)')
@@ -305,9 +305,9 @@ export class SemanticLinkerSettingTab extends PluginSettingTab {
                         }),
                 );
         });
-    }
+    };
 
-    private addExclusionInput(group: SettingGroup) {
+    private addExclusionInput = (group: SettingGroup) => {
         let statusEl: HTMLElement;
         let previewListEl: HTMLElement;
 
@@ -321,7 +321,9 @@ export class SemanticLinkerSettingTab extends PluginSettingTab {
             statusEl.setText(
                 count === 0
                     ? 'No files match the exclusion patterns.'
-                    : `${count} ${count === 1 ? 'file' : 'files'} will be excluded from indexing.`,
+                    : `${count} ${
+                          count === 1 ? 'file' : 'files'
+                      } will be excluded from indexing.`,
             );
 
             previewListEl.empty();
@@ -439,9 +441,9 @@ export class SemanticLinkerSettingTab extends PluginSettingTab {
         });
 
         refreshPreview();
-    }
+    };
 
-    private renderDisplaySettings(container: HTMLElement) {
+    private renderDisplaySettings = (container: HTMLElement) => {
         const group = new SettingGroup(container);
         group.setHeading('Display');
 
@@ -504,9 +506,9 @@ export class SemanticLinkerSettingTab extends PluginSettingTab {
                         }),
                 );
         });
-    }
+    };
 
-    private renderSearchSettings(container: HTMLElement) {
+    private renderSearchSettings = (container: HTMLElement) => {
         const group = new SettingGroup(container);
         group.setHeading('Search');
 
@@ -560,9 +562,9 @@ export class SemanticLinkerSettingTab extends PluginSettingTab {
                         .onChange((v) => void this.save({ minQueryLength: v })),
                 );
         });
-    }
+    };
 
-    private renderAdvancedSettings(container: HTMLElement) {
+    private renderAdvancedSettings = (container: HTMLElement) => {
         const group = new SettingGroup(container);
         group.setHeading('Advanced');
 
@@ -674,5 +676,5 @@ export class SemanticLinkerSettingTab extends PluginSettingTab {
                         ),
                 );
         });
-    }
+    };
 }
