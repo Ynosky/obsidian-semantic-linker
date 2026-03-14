@@ -10,7 +10,7 @@ import {
 import { ActiveSearchService } from 'services/active_search';
 import { ExclusionService, TagManager } from 'services/filtering';
 import { IndexingService } from 'services/indexing';
-import { OllamaService } from 'services/ollama';
+import { GeminiService } from 'services/gemini';
 import { StatusService } from 'services/status_store';
 import { VectorStoreService } from 'services/vector_store';
 import { logger } from 'shared/notify';
@@ -29,7 +29,7 @@ import { SimilarNotesSidebarView } from './ui/similar_notes_sidebar';
 
 export default class MainPlugin extends Plugin {
     settings: SettingParams = DEFAULT_SETTINGS;
-    ollamaService!: OllamaService;
+    geminiService!: GeminiService;
     statusService!: StatusService;
     tagManager!: TagManager;
     exclusionService!: ExclusionService;
@@ -73,11 +73,12 @@ export default class MainPlugin extends Plugin {
         const loadedData = (await this.loadData()) as SettingParams | null;
         this.settings = Object.assign({}, DEFAULT_SETTINGS, loadedData ?? {});
 
-        this.ollamaService = new OllamaService(this.settings.ollamaUrl);
-        void this.ollamaService.fetchModels().then((result) => {
+        // GeminiService の初期化（API キーを使用）
+        this.geminiService = new GeminiService(this.settings.geminiApiKey);
+        void this.geminiService.fetchModels().then((result) => {
             if (!result.ok) {
                 logger.errorLog(
-                    'Failed to fetch models on startup',
+                    'Failed to verify Gemini API',
                     result.error,
                 );
             }
@@ -101,9 +102,10 @@ export default class MainPlugin extends Plugin {
             tags: this.tagManager,
         });
 
+        // IndexingService に GeminiService を渡す
         this.indexingService = new IndexingService(
             this.app.vault,
-            this.ollamaService,
+            this.geminiService,
             this.vectorStoreService,
             this.statusService,
             this.exclusionService,
@@ -296,7 +298,8 @@ export default class MainPlugin extends Plugin {
 
     async saveSettings() {
         await this.saveData(this.settings);
-        this.ollamaService.reconfigure(this.settings.ollamaUrl);
+        // GeminiService を API キーで再設定
+        this.geminiService.reconfigure(this.settings.geminiApiKey);
         this.exclusionService.refresh();
         this.indexingService.reconfigureDebounce();
         this.refreshInlineViews();
