@@ -158,14 +158,22 @@ export class GeminiService {
                     content: { role: 'user', parts: [{ text }] },
                 })),
             });
-            
-            if (!batchResult.embeddings || batchResult.embeddings.length === 0) {
-                return { ok: false, error: 'No embeddings returned from batch request' };
+
+            if (
+                !batchResult.embeddings ||
+                batchResult.embeddings.length === 0
+            ) {
+                return {
+                    ok: false,
+                    error: 'No embeddings returned from batch request',
+                };
             }
 
             return {
                 ok: true,
-                value: { embeddings: batchResult.embeddings.map((e) => e.values) },
+                value: {
+                    embeddings: batchResult.embeddings.map((e) => e.values),
+                },
             };
         } catch (error) {
             return { ok: false, error: this.handleEmbedError(error) };
