@@ -7,7 +7,7 @@ export type ModelMetadata = {
 };
 
 export const GEMINI_CONTEXT_LENGTH = 2048;
-export const GEMINI_EMBEDDING_MODEL = 'models/text-embedding-004';
+export const GEMINI_EMBEDDING_MODEL = 'text-embedding-004';
 
 export class GeminiService {
     private client: GoogleGenerativeAI | null = null;
@@ -154,7 +154,7 @@ export class GeminiService {
             });
             const batchResult = await model.batchEmbedContents({
                 requests: inputs.map((text) => ({
-                    model: GEMINI_EMBEDDING_MODEL,
+                    model: `models/${GEMINI_EMBEDDING_MODEL}`,
                     content: { role: 'user', parts: [{ text }] },
                 })),
             });
