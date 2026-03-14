@@ -9,8 +9,8 @@ import {
 } from 'obsidian';
 import { ActiveSearchService } from 'services/active_search';
 import { ExclusionService, TagManager } from 'services/filtering';
+import { GEMINI_CONTEXT_LENGTH, GeminiService } from 'services/gemini';
 import { IndexingService } from 'services/indexing';
-import { GeminiService } from 'services/gemini';
 import { StatusService } from 'services/status_store';
 import { VectorStoreService } from 'services/vector_store';
 import { logger } from 'shared/notify';
@@ -77,10 +77,7 @@ export default class MainPlugin extends Plugin {
         this.geminiService = new GeminiService(this.settings.geminiApiKey);
         void this.geminiService.fetchModels().then((result) => {
             if (!result.ok) {
-                logger.errorLog(
-                    'Failed to verify Gemini API',
-                    result.error,
-                );
+                logger.errorLog('Failed to verify Gemini API', result.error);
             }
         });
 
@@ -88,6 +85,10 @@ export default class MainPlugin extends Plugin {
         this.statusService = new StatusService(dbName, triggerRefresh);
         await this.statusService.load();
 
+        // Initialize modelContextLength for Gemini (mirrors original Ollama model-select flow)
+        await this.statusService.update({
+            modelContextLength: GEMINI_CONTEXT_LENGTH,
+        });
         this.vectorStoreService = new VectorStoreService(dbName);
         await this.vectorStoreService.load();
 

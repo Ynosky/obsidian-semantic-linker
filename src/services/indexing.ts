@@ -11,7 +11,8 @@ import type {
     Vector,
 } from '../types';
 import type { ExclusionService } from './filtering';
-import type { OllamaService } from './ollama';
+import type { GeminiService } from './gemini';
+import { GEMINI_EMBEDDING_MODEL } from './gemini';
 import type { StatusService } from './status_store';
 import {
     StoreOps,
@@ -45,7 +46,7 @@ export class IndexingService {
 
     constructor(
         private vault: Vault,
-        private ollama: OllamaService,
+        private gemini: GeminiService,
         private vector: VectorStoreService,
         private status: StatusService,
         private exclusion: ExclusionService,
@@ -204,11 +205,10 @@ export class IndexingService {
     };
 
     private updateStats = async (): Promise<void> => {
-        const settings = this.getSettings();
         await this.status.update({
             lastIndexTime: Date.now(),
             lastIndexCount: Object.keys(this.vector.getState().entries).length,
-            lastModelUsed: settings.ollamaModel,
+            lastModelUsed: GEMINI_EMBEDDING_MODEL,
         });
         this.onIndexFinished();
     };
@@ -378,8 +378,8 @@ export class IndexingService {
         }
 
         const chunkTexts = rawChunks.map((c) => c.text);
-        const result = await this.ollama.embed(
-            settings.ollamaModel,
+        const result = await this.gemini.embed(
+            GEMINI_EMBEDDING_MODEL,
             chunkTexts,
         );
 

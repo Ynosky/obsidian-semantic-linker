@@ -1,6 +1,5 @@
 import {
     type App,
-    type DropdownComponent,
     PluginSettingTab,
     type Setting,
     SettingGroup,
@@ -49,79 +48,41 @@ export class SemanticLinkerSettingTab extends PluginSettingTab {
         group.setHeading('Connection');
 
         group.addSetting((setting) => {
-    setting
-        .setName('Gemini API Key')
-        .setDesc('Your Google Generative AI API key')
-        .addText((text) =>
-            text
-                .setValue(this.plugin.settings.geminiApiKey)
-                .setPlaceholder('Enter your API key')
-                .onChange((val) =>
-                    void this.plugin.updateSettings({
-                        geminiApiKey: val,
-                    }),
-                ),
-        );
-    };
-
-    private setupModelDropdown = (d: DropdownComponent) => {
-        const models = this.plugin.ollamaService.getModels();
-
-        if (models.length > 0) {
-            this.populateModelDropdown(d, models);
-        } else {
-            d.addOption('', 'No models found (check connection)');
-            d.setDisabled(true);
-        }
-    };
-
-    private populateModelDropdown = (
-        dropdown: DropdownComponent,
-        models: readonly string[],
-    ) => {
-        const current = this.plugin.settings.ollamaModel;
-        dropdown.selectEl.empty();
-        dropdown.setDisabled(false);
-
-        if (current && !models.includes(current)) {
-            dropdown.addOption(current, `${current} (not found)`);
-        }
-
-        for (const model of models) {
-            dropdown.addOption(model, model);
-        }
-
-        dropdown.setValue(current).onChange((val) => {
-            void this.plugin
-                .updateSettings({ ollamaModel: val })
-                .then(async () => {
-                    const res =
-                        await this.plugin.ollamaService.getModelMetadata(val);
-                    if (res.ok) {
-                        await this.plugin.statusService.update({
-                            modelContextLength: res.value.contextLength,
+            setting
+                .setName('Gemini API Key')
+                .setDesc('Your Google Generative AI API key')
+                .addText((text) =>
+                    text
+                        .setValue(this.plugin.settings.geminiApiKey)
+                        .setPlaceholder('Enter your API key')
+                        .onChange(
+                            (val) =>
+                                void this.plugin.updateSettings({
+                                    geminiApiKey: val,
+                                }),
+                        ),
+                )
+                .addExtraButton((btn) => {
+                    btn.setIcon('check-circle')
+                        .setTooltip('Verify API key')
+                        .onClick(async () => {
+                            btn.setDisabled(true);
+                            const result =
+                                await this.plugin.geminiService.fetchModels();
+                            if (!result.ok) {
+                                logger.error(
+                                    'Gemini API key verification failed',
+                                    result.error,
+                                );
+                            } else {
+                                logger.info(
+                                    'Gemini API key verified successfully',
+                                );
+                            }
+                            btn.setDisabled(false);
+                            this.display();
                         });
-                        logger.info(
-                            `Model profile updated: ${val} (Context: ${res.value.contextLength})`,
-                        );
-                        this.display();
-                    }
                 });
-        });
-    };
-
-    private renderModelMetadata = (setting: Setting) => {
-        const contextLength =
-            this.plugin.statusService.getState().modelContextLength;
-        if (!contextLength) return;
-
-        setting.descEl
-            .querySelector('.setting-item-description-spec')
-            ?.remove();
-
-        setting.descEl.createEl('div', {
-            text: `Context length: ${contextLength} tokens`,
-            cls: 'setting-item-description-spec text-[0.85em] text-[var(--text-muted)] mt-1',
         });
     };
 

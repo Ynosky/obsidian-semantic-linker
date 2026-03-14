@@ -6,47 +6,26 @@ export type ModelMetadata = {
     readonly contextLength: number;
 };
 
-const DEFAULT_CONTEXT_LENGTH = 2048;
-
-// Gemini Embedding API のレスポンス型
-interface GeminiEmbedResponse {
-    embedding: {
-        values: number[];
-    };
-}
-
-interface GeminiBatchEmbedResponse {
-    embeddings: Array<{
-        values: number[];
-    }>;
-}
+export const GEMINI_CONTEXT_LENGTH = 2048;
+export const GEMINI_EMBEDDING_MODEL = 'text-embedding-004';
 
 export class GeminiService {
     private client: GoogleGenerativeAI | null = null;
-    private apiKey: string = '';
-    private cachedModels: string[] = ['text-embedding-004'];
     private requestQueue: Array<() => Promise<unknown>> = [];
     private isProcessingQueue = false;
     private lastRequestTime = 0;
     private readonly MIN_REQUEST_INTERVAL = 100; // 100ms間隔でレート制限
 
     constructor(apiKey: string) {
-        this.setApiKey(apiKey);
-    }
-
-    public setApiKey = (apiKey: string): void => {
-        this.apiKey = apiKey;
         if (apiKey) {
             this.client = new GoogleGenerativeAI(apiKey);
-        } else {
-            this.client = null;
         }
-    };
+    }
 
-    public getModels = (): readonly string[] => [...this.cachedModels];
+    public getModels = (): readonly string[] => [GEMINI_EMBEDDING_MODEL];
 
     public reconfigure = (apiKey: string): void => {
-        this.setApiKey(apiKey);
+        this.client = apiKey ? new GoogleGenerativeAI(apiKey) : null;
     };
 
     public fetchModels = async (): Promise<Result<void>> => {
@@ -74,7 +53,7 @@ export class GeminiService {
     ): Promise<Result<ModelMetadata>> => {
         return {
             ok: true,
-            value: { contextLength: DEFAULT_CONTEXT_LENGTH },
+            value: { contextLength: GEMINI_CONTEXT_LENGTH },
         };
     };
 
@@ -132,88 +111,72 @@ export class GeminiService {
         input: string | string[],
     ): Promise<Result<{ embeddings: number[][] }>> => {
         if (!this.client) {
-            return {
-                ok: false,
-                error: 'Gemini API client not initialized',
-            };
+            return { ok: false, error: 'Gemini API client not initialized' };
         }
-
         try {
-            const inputs = Array.isArray(input) ? input : [input];
-
-            // Gemini API はバッチ埋め込みをサポート
-            const model = this.client.getGenerativeModel({
-                model: 'embedding-001',
-            });
-
-            const request = {
-                content: {
-                    parts: inputs.map((text) => ({ text })),
-                },
-            };
-
-            // @ts-ignore - Gemini SDK typing
-            const result = await model.embedContent(request);
-
-            if (!result.embedding?.values) {
-                return {
-                    ok: false,
-                    error: 'No embedding values in response',
-                };
+            if (typeof input === 'string') {
+                return await this.embedSingle(this.client, input);
             }
-
-            // 単一のテキストの場合
-            if (inputs.length === 1) {
-                return {
-                    ok: true,
-                    value: {
-                        embeddings: [result.embedding.values],
-                    },
-                };
-            }
-
-            // 複数テキストの場合はループで処理
-            const embeddings: number[][] = [];
-            for (const text of inputs) {
-                const res = await this.client
-                    .getGenerativeModel({ model: 'embedding-001' })
-                    .embedContent(text);
-
-                if (res.embedding?.values) {
-                    embeddings.push(res.embedding.values);
-                }
-            }
-
-            if (embeddings.length !== inputs.length) {
-                return {
-                    ok: false,
-                    error: `Expected ${inputs.length} embeddings, got ${embeddings.length}`,
-                };
-            }
-
-            return {
-                ok: true,
-                value: { embeddings },
-            };
+            return input.length === 1 && input[0] !== undefined
+                ? await this.embedSingle(this.client, input[0])
+                : await this.embedBatch(this.client, input);
         } catch (error) {
-            const message =
-                error instanceof Error ? error.message : String(error);
+            return { ok: false, error: this.handleEmbedError(error) };
+        }
+    };
 
-            // レート制限エラーの検出
-            if (
-                message.includes('RESOURCE_EXHAUSTED') ||
-                message.includes('quota')
-            ) {
-                logger.errorLog(
-                    'Gemini API quota exceeded',
-                    'Free tier limit reached. Please wait or upgrade.',
-                );
-            }
+    private embedSingle = async (
+        client: GoogleGenerativeAI,
+        text: string,
+    ): Promise<Result<{ embeddings: number[][] }>> => {
+        const model = client.getGenerativeModel({
+            model: GEMINI_EMBEDDING_MODEL,
+        });
+        const result = await model.embedContent(text);
+        if (!result.embedding?.values) {
+            return { ok: false, error: 'No embedding values in response' };
+        }
+        return { ok: true, value: { embeddings: [result.embedding.values] } };
+    };
 
+    private embedBatch = async (
+        client: GoogleGenerativeAI,
+        inputs: string[],
+    ): Promise<Result<{ embeddings: number[][] }>> => {
+        const model = client.getGenerativeModel({
+            model: GEMINI_EMBEDDING_MODEL,
+        });
+        const batchResult = await model.batchEmbedContents({
+            requests: inputs.map((text) => ({
+                content: { role: 'user', parts: [{ text }] },
+            })),
+        });
+        if (
+            !batchResult.embeddings ||
+            batchResult.embeddings.length !== inputs.length
+        ) {
             return {
                 ok: false,
-                error: message,
+                error: `Expected ${inputs.length} embeddings, got ${batchResult.embeddings?.length ?? 0}`,
             };
         }
+        return {
+            ok: true,
+            value: { embeddings: batchResult.embeddings.map((e) => e.values) },
+        };
+    };
+
+    private handleEmbedError = (error: unknown): string => {
+        const message = error instanceof Error ? error.message : String(error);
+        if (
+            message.includes('RESOURCE_EXHAUSTED') ||
+            message.includes('quota')
+        ) {
+            logger.errorLog(
+                'Gemini API quota exceeded',
+                'Free tier limit reached. Please wait or upgrade.',
+            );
+        }
+        return message;
     };
 }
