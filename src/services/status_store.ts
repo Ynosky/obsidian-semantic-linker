@@ -42,7 +42,7 @@ export class StatusService {
             const result =
                 await this.provider.getByKey<StatusRecord>(STATUS_ID);
             if (result) {
-                const { id, ...savedStatus } = result;
+                const { id: _, ...savedStatus } = result;
                 this.cachedState = { ...DEFAULT_STATUS, ...savedStatus };
             }
         } catch (error) {
