@@ -4,8 +4,7 @@ export const DB_PREFIX = 'obsidian-semantic-linker';
 export const DB_VERSION = 2;
 
 export const DEFAULT_SETTINGS: SettingParams = {
-    ollamaUrl: 'http://localhost:11434',
-    ollamaModel: '',
+    geminiApiKey: '', // 新規: API キー
     threshold: 0.5,
     sidebarLimit: 10,
     searchLimit: 20,
