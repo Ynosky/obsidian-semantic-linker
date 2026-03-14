@@ -39,7 +39,7 @@ export class GeminiService {
         }
 
         // API キーの妥当性をチェック
-        const testRes = await this.embed('text-embedding-004', 'test');
+        const testRes = await this.embed(GEMINI_EMBEDDING_MODEL, 'test');
         if (!testRes.ok) {
             logger.errorLog('Failed to verify Gemini API', testRes.error);
             return testRes;
