@@ -42,9 +42,8 @@ export class StatusService {
             const result =
                 await this.provider.getByKey<StatusRecord>(STATUS_ID);
             if (result) {
-                const savedStatus = { ...result };
-                delete (savedStatus as any).id;
-                this.cachedState = { ...DEFAULT_STATUS, ...savedStatus };
+                const { id, ...rest } = result as StatusRecord;
+                this.cachedState = { ...DEFAULT_STATUS, ...rest };
             }
         } catch (error) {
             logger.warnLog('Failed to load status from DB:', error);

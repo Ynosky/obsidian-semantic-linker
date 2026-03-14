@@ -1,6 +1,6 @@
 {
     "name": "semantic-linker",
-    "version": "0.0.12",
+    "version": "0.0.13",
     "description": "Semantic Linker for Obsidian with Gemini API",
     "main": "main.js",
     "type": "module",
