@@ -6,33 +6,26 @@ export type ModelMetadata = {
     readonly contextLength: number;
 };
 
-const DEFAULT_CONTEXT_LENGTH = 2048;
+export const GEMINI_CONTEXT_LENGTH = 2048;
 export const GEMINI_EMBEDDING_MODEL = 'text-embedding-004';
 
 export class GeminiService {
     private client: GoogleGenerativeAI | null = null;
-    private cachedModels: string[] = [GEMINI_EMBEDDING_MODEL];
     private requestQueue: Array<() => Promise<unknown>> = [];
     private isProcessingQueue = false;
     private lastRequestTime = 0;
     private readonly MIN_REQUEST_INTERVAL = 100; // 100ms間隔でレート制限
 
     constructor(apiKey: string) {
-        this.setApiKey(apiKey);
-    }
-
-    public setApiKey = (apiKey: string): void => {
         if (apiKey) {
             this.client = new GoogleGenerativeAI(apiKey);
-        } else {
-            this.client = null;
         }
-    };
+    }
 
-    public getModels = (): readonly string[] => [...this.cachedModels];
+    public getModels = (): readonly string[] => [GEMINI_EMBEDDING_MODEL];
 
     public reconfigure = (apiKey: string): void => {
-        this.setApiKey(apiKey);
+        this.client = apiKey ? new GoogleGenerativeAI(apiKey) : null;
     };
 
     public fetchModels = async (): Promise<Result<void>> => {
@@ -60,7 +53,7 @@ export class GeminiService {
     ): Promise<Result<ModelMetadata>> => {
         return {
             ok: true,
-            value: { contextLength: DEFAULT_CONTEXT_LENGTH },
+            value: { contextLength: GEMINI_CONTEXT_LENGTH },
         };
     };
 

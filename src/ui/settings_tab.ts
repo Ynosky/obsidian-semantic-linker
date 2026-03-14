@@ -61,7 +61,28 @@ export class SemanticLinkerSettingTab extends PluginSettingTab {
                                     geminiApiKey: val,
                                 }),
                         ),
-                );
+                )
+                .addExtraButton((btn) => {
+                    btn.setIcon('check-circle')
+                        .setTooltip('Verify API key')
+                        .onClick(async () => {
+                            btn.setDisabled(true);
+                            const result =
+                                await this.plugin.geminiService.fetchModels();
+                            if (!result.ok) {
+                                logger.error(
+                                    'Gemini API key verification failed',
+                                    result.error,
+                                );
+                            } else {
+                                logger.info(
+                                    'Gemini API key verified successfully',
+                                );
+                            }
+                            btn.setDisabled(false);
+                            this.display();
+                        });
+                });
         });
     };
 
