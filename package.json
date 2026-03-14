@@ -6,16 +6,16 @@
     "type": "module",
     "scripts": {
         "dev": "node esbuild.config.mjs",
-        "watch:css": "pnpm tailwindcss -i ./src/input.css -o ./styles.css --watch",
+        "watch:css": "tailwindcss -i ./src/input.css -o ./styles.css --watch",
         "watch": "node esbuild.config.mjs watch",
-        "build:css": "pnpm tailwindcss -i ./src/input.css -o ./styles.css --minify",
-        "build": "pnpm build:css && tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+        "build:css": "tailwindcss -i ./src/input.css -o ./styles.css --minify",
+        "build": "npm run build:css && tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
         "version": "node version-bump.mjs && git add manifest.json versions.json",
         "lint:md": "eslint .",
         "lint": "biome check .",
         "lint:fix": "biome check --write .",
         "format": "biome format --write .",
-        "all": "pnpm format && pnpm lint && pnpm lint:md && pnpm build"
+        "all": "npm run format && npm run lint && npm run lint:md && npm run build"
     },
     "keywords": [],
     "devDependencies": {
