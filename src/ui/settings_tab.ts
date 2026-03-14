@@ -49,7 +49,7 @@ export class SemanticLinkerSettingTab extends PluginSettingTab {
 
         group.addSetting((setting) => {
             setting
-                .setName('Gemini API Key')
+                .setName('Gemini API key')
                 .setDesc('Your Google Generative AI API key')
                 .addText((text) =>
                     text
