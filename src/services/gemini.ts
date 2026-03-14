@@ -129,41 +129,47 @@ export class GeminiService {
         client: GoogleGenerativeAI,
         text: string,
     ): Promise<Result<{ embeddings: number[][] }>> => {
-        const model = client.getGenerativeModel({
-            model: GEMINI_EMBEDDING_MODEL,
-        });
-        const result = await model.embedContent(text);
-        if (!result.embedding?.values) {
-            return { ok: false, error: 'No embedding values in response' };
+        try {
+            const model = client.getGenerativeModel({
+                model: GEMINI_EMBEDDING_MODEL,
+            });
+            const result = await model.embedContent(text);
+            const values = result.embedding?.values;
+            if (!values || values.length === 0) {
+                return { ok: false, error: 'No embedding values in response' };
+            }
+            return { ok: true, value: { embeddings: [values] } };
+        } catch (error) {
+            return { ok: false, error: this.handleEmbedError(error) };
         }
-        return { ok: true, value: { embeddings: [result.embedding.values] } };
     };
 
     private embedBatch = async (
         client: GoogleGenerativeAI,
         inputs: string[],
     ): Promise<Result<{ embeddings: number[][] }>> => {
-        const model = client.getGenerativeModel({
-            model: GEMINI_EMBEDDING_MODEL,
-        });
-        const batchResult = await model.batchEmbedContents({
-            requests: inputs.map((text) => ({
-                content: { role: 'user', parts: [{ text }] },
-            })),
-        });
-        if (
-            !batchResult.embeddings ||
-            batchResult.embeddings.length !== inputs.length
-        ) {
+        try {
+            const model = client.getGenerativeModel({
+                model: GEMINI_EMBEDDING_MODEL,
+            });
+            const batchResult = await model.batchEmbedContents({
+                requests: inputs.map((text) => ({
+                    model: `models/${GEMINI_EMBEDDING_MODEL}`,
+                    content: { role: 'user', parts: [{ text }] },
+                })),
+            });
+            
+            if (!batchResult.embeddings || batchResult.embeddings.length === 0) {
+                return { ok: false, error: 'No embeddings returned from batch request' };
+            }
+
             return {
-                ok: false,
-                error: `Expected ${inputs.length} embeddings, got ${batchResult.embeddings?.length ?? 0}`,
+                ok: true,
+                value: { embeddings: batchResult.embeddings.map((e) => e.values) },
             };
+        } catch (error) {
+            return { ok: false, error: this.handleEmbedError(error) };
         }
-        return {
-            ok: true,
-            value: { embeddings: batchResult.embeddings.map((e) => e.values) },
-        };
     };
 
     private handleEmbedError = (error: unknown): string => {
