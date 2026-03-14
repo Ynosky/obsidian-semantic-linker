@@ -11,10 +11,8 @@ export type SimilaritySearchMode = 'top-k-mean' | 'max-sim' | 'average-pooling';
  * プラグインの設定値
  */
 export type SettingParams = {
-    /** OllamaサーバーのベースURL */
-    ollamaUrl: string;
-    /** 使用するモデル名 */
-    ollamaModel: string;
+    /** Gemini API キー */
+    geminiApiKey: string;
     /** 類似度のしきい値（0.0 〜 1.0） */
     threshold: number;
     /** サイドバーに表示する最大件数 */
