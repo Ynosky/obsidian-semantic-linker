@@ -7,24 +7,11 @@ export type ModelMetadata = {
 };
 
 const DEFAULT_CONTEXT_LENGTH = 2048;
-
-// Gemini Embedding API のレスポンス型
-interface GeminiEmbedResponse {
-    embedding: {
-        values: number[];
-    };
-}
-
-interface GeminiBatchEmbedResponse {
-    embeddings: Array<{
-        values: number[];
-    }>;
-}
+export const GEMINI_EMBEDDING_MODEL = 'text-embedding-004';
 
 export class GeminiService {
     private client: GoogleGenerativeAI | null = null;
-    private apiKey: string = '';
-    private cachedModels: string[] = ['text-embedding-004'];
+    private cachedModels: string[] = [GEMINI_EMBEDDING_MODEL];
     private requestQueue: Array<() => Promise<unknown>> = [];
     private isProcessingQueue = false;
     private lastRequestTime = 0;
@@ -35,7 +22,6 @@ export class GeminiService {
     }
 
     public setApiKey = (apiKey: string): void => {
-        this.apiKey = apiKey;
         if (apiKey) {
             this.client = new GoogleGenerativeAI(apiKey);
         } else {
@@ -143,7 +129,7 @@ export class GeminiService {
 
             // Gemini API はバッチ埋め込みをサポート
             const model = this.client.getGenerativeModel({
-                model: 'embedding-001',
+                model: GEMINI_EMBEDDING_MODEL,
             });
 
             const request = {
@@ -152,7 +138,8 @@ export class GeminiService {
                 },
             };
 
-            // @ts-ignore - Gemini SDK typing
+            // @ts-expect-error - embedContent SDK typing does not accept a plain
+            // Content object without the 'role' field in v0.11.x
             const result = await model.embedContent(request);
 
             if (!result.embedding?.values) {
@@ -176,7 +163,7 @@ export class GeminiService {
             const embeddings: number[][] = [];
             for (const text of inputs) {
                 const res = await this.client
-                    .getGenerativeModel({ model: 'embedding-001' })
+                    .getGenerativeModel({ model: GEMINI_EMBEDDING_MODEL })
                     .embedContent(text);
 
                 if (res.embedding?.values) {

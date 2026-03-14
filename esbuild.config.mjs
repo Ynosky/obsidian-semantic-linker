@@ -1,5 +1,4 @@
 import { builtinModules } from 'node:module';
-import path from 'node:path';
 import process from 'node:process';
 import esbuild from 'esbuild';
 
@@ -13,17 +12,12 @@ const mode = process.argv[2];
 const isProd = mode === 'production';
 const isWatch = mode === 'watch';
 
-const ollamaBrowserPath = path.resolve('node_modules/ollama/dist/browser.mjs');
-
 const buildOptions = {
     banner: {
         js: banner,
     },
     entryPoints: ['src/main.ts'],
     bundle: true,
-    alias: {
-        ollama: ollamaBrowserPath,
-    },
     external: [
         'obsidian',
         'electron',
