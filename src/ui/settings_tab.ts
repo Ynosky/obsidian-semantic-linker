@@ -49,47 +49,19 @@ export class SemanticLinkerSettingTab extends PluginSettingTab {
         group.setHeading('Connection');
 
         group.addSetting((setting) => {
-            setting
-                .setName('Ollama URL')
-                .setDesc(
-                    'Ollama server base URL (e.g., http://localhost:11434)',
-                )
-                .addText((text) =>
-                    text.setValue(this.plugin.settings.ollamaUrl).onChange(
-                        (val) =>
-                            void this.plugin.updateSettings({
-                                ollamaUrl: val,
-                            }),
-                    ),
-                );
-        });
-
-        group.addSetting((setting) => {
-            setting
-                .setName('Ollama model')
-                .setDesc('The model used for vector generation.')
-                .addDropdown((d) => this.setupModelDropdown(d))
-                .addExtraButton((btn) => {
-                    btn.setIcon('rotate-cw')
-                        .setTooltip('Refresh model list')
-                        .onClick(async () => {
-                            btn.setDisabled(true);
-                            const result =
-                                await this.plugin.ollamaService.fetchModels();
-                            if (!result.ok) {
-                                logger.error(
-                                    'Failed to refresh models',
-                                    result.error,
-                                );
-                            } else {
-                                logger.info('Models refreshed successfully');
-                            }
-                            this.display();
-                        });
-                });
-
-            this.renderModelMetadata(setting);
-        });
+    setting
+        .setName('Gemini API Key')
+        .setDesc('Your Google Generative AI API key')
+        .addText((text) =>
+            text
+                .setValue(this.plugin.settings.geminiApiKey)
+                .setPlaceholder('Enter your API key')
+                .onChange((val) =>
+                    void this.plugin.updateSettings({
+                        geminiApiKey: val,
+                    }),
+                ),
+        );
     };
 
     private setupModelDropdown = (d: DropdownComponent) => {
