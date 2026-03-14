@@ -7,7 +7,7 @@ export type ModelMetadata = {
 };
 
 export const GEMINI_CONTEXT_LENGTH = 2048;
-export const GEMINI_EMBEDDING_MODEL = 'text-embedding-004';
+export const GEMINI_EMBEDDING_MODEL = 'gemini-embedding-001';
 
 export class GeminiService {
     private client: GoogleGenerativeAI | null = null;
