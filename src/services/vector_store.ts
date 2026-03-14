@@ -35,7 +35,8 @@ export const StoreOps = {
     }),
 
     remove: (store: VectorStore, path: string): VectorStore => {
-        const { [path]: _, ...rest } = store.entries;
+        const rest = { ...store.entries };
+        delete rest[path];
         return { ...store, entries: rest };
     },
 
