@@ -1,7 +1,7 @@
 {
     "id": "semantic-linker",
     "name": "Semantic Linker",
-    "version": "0.0.3",
+    "version": "0.0.4",
     "minAppVersion": "1.11.0",
     "description": "Find semantically similar notes using Gemini API. Semantic search powered by Google Generative AI.",
     "author": "amatzk",
